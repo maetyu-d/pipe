@@ -1553,7 +1553,7 @@ private:
         auto title = layout.top.reduced (16, 10).removeFromLeft (142);
         g.setColour (PipeLookAndFeel::ink);
         g.setFont (juce::FontOptions (17.0f).withStyle ("Bold"));
-        g.drawFittedText ("pipe pop", title.removeFromTop (24), juce::Justification::centredLeft, 1);
+        g.drawFittedText ("pipe", title.removeFromTop (24), juce::Justification::centredLeft, 1);
         g.setColour (PipeLookAndFeel::pink);
         g.setFont (juce::FontOptions (10.0f).withStyle ("Bold"));
         g.drawFittedText ("12^3 rainbow pipes", title, juce::Justification::centredLeft, 1);
