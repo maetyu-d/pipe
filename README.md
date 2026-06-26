@@ -1,4 +1,4 @@
-# Pipe Grid Music
+# pipe
 
 A JUCE/C++ music game inspired by the supplied 12x12x12 pipe matrix HTML demo.
 
@@ -14,7 +14,7 @@ cmake --build build --config Debug -j4
 The app bundle is created at:
 
 ```text
-build/PipeGridMusic_artefacts/Debug/Pipe Grid Music.app
+build/pipe_artefacts/Debug/pipe.app
 ```
 
 ## Play

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(PipeGridMusic VERSION 0.1.0 LANGUAGES C CXX)
+project(pipe VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,26 +17,26 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_gui_app(PipeGridMusic
-    PRODUCT_NAME "Pipe Grid Music"
+juce_add_gui_app(pipe
+    PRODUCT_NAME "pipe"
     COMPANY_NAME "Codex"
-    BUNDLE_ID "com.codex.pipegridmusic"
+    BUNDLE_ID "com.codex.pipe"
 )
 
-target_sources(PipeGridMusic
+target_sources(pipe
     PRIVATE
         Source/Main.cpp
 )
 
-target_compile_definitions(PipeGridMusic
+target_compile_definitions(pipe
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
-        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:PipeGridMusic,JUCE_PRODUCT_NAME>"
-        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PipeGridMusic,JUCE_VERSION>"
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:pipe,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:pipe,JUCE_VERSION>"
 )
 
-target_link_libraries(PipeGridMusic
+target_link_libraries(pipe
     PRIVATE
         juce::juce_audio_utils
         juce::juce_gui_extra

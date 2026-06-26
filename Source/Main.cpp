@@ -38,6 +38,11 @@ struct FVec3
     float z = 0.0f;
 };
 
+FVec3 toFloatVector (IVec3 value) noexcept
+{
+    return { (float) value.x, (float) value.y, (float) value.z };
+}
+
 struct Direction
 {
     uint8_t bit = 0;
@@ -1032,6 +1037,7 @@ private:
     double bpm = 120.0;
     double emitAccumulator = 0.0;
     double lastTimerMs = 0.0;
+    IVec3 gravityVector { 0, -1, 0 };
     std::vector<Flow> flows;
 
     double currentSampleRate = 44100.0;
@@ -1089,6 +1095,30 @@ private:
                    tool == Tool::tap ? "Tap tool" :
                    tool == Tool::valve ? "Valve tool" :
                    tool == Tool::drain ? "Drain tool" : "Erase tool");
+        repaint();
+    }
+
+    IVec3 gravityForFace (int faceIndex) const noexcept
+    {
+        return -faces[(size_t) faceIndex].v;
+    }
+
+    void updateGravityForSelectedFace()
+    {
+        gravityVector = gravityForFace (selectedFace);
+        if (playing)
+            setStatus ("Gravity follows " + juce::String (faces[(size_t) selectedFace].name));
+    }
+
+    void setSelectedFace (int faceIndex)
+    {
+        selectedFace = juce::jlimit (0, 5, faceIndex);
+        faceBox.setSelectedItemIndex (selectedFace, juce::dontSendNotification);
+
+        if (playing)
+            updateGravityForSelectedFace();
+
+        updateButtonStates();
         repaint();
     }
 
@@ -1210,6 +1240,9 @@ private:
         playing = shouldPlay;
         emitAccumulator = shouldPlay ? secondsPerBeat() : 0.0;
         lastTimerMs = juce::Time::getMillisecondCounterHiRes();
+
+        if (shouldPlay)
+            updateGravityForSelectedFace();
 
         if (! shouldPlay)
             flows.clear();
@@ -1340,19 +1373,51 @@ private:
 
     void advanceFallingFlow (Flow& flow, double beatFraction)
     {
-        const auto previousY = flow.fallPosition.y;
-        const auto nextY = previousY - (float) (beatFraction * 2.0);
-        const auto x = juce::jlimit (0, gridSize - 1, (int) std::round (flow.fallPosition.x));
-        const auto z = juce::jlimit (0, gridSize - 1, (int) std::round (flow.fallPosition.z));
+        const auto previous = flow.fallPosition;
+        const auto gravity = toFloatVector (gravityVector);
+        const auto distance = (float) (beatFraction * 2.0);
+        const FVec3 next {
+            previous.x + gravity.x * distance,
+            previous.y + gravity.y * distance,
+            previous.z + gravity.z * distance
+        };
 
-        const auto startCellY = juce::jlimit (0, gridSize - 1, (int) std::floor (previousY - 0.001f));
-        const auto endCellY = juce::jlimit (0, gridSize - 1, (int) std::floor (nextY));
-
-        for (int y = startCellY; y >= endCellY; --y)
+        const auto axisValue = [] (FVec3 value, IVec3 axis)
         {
-            const IVec3 candidate { x, y, z };
+            if (axis.x != 0) return value.x;
+            if (axis.y != 0) return value.y;
+            return value.z;
+        };
 
-            if (! network.hasPipe (candidate))
+        const auto setAxisValue = [] (IVec3& value, IVec3 axis, int coordinate)
+        {
+            if (axis.x != 0) value.x = coordinate;
+            else if (axis.y != 0) value.y = coordinate;
+            else value.z = coordinate;
+        };
+
+        const auto startAxis = axisValue (previous, gravityVector);
+        const auto endAxis = axisValue (next, gravityVector);
+        const auto gravitySign = coordinateOnAxis (gravityVector, gravityVector);
+        const auto startStep = gravitySign > 0
+                                ? (int) std::ceil (startAxis + 0.001f)
+                                : (int) std::floor (startAxis - 0.001f);
+        const auto endStep = gravitySign > 0
+                                ? (int) std::ceil (endAxis)
+                                : (int) std::floor (endAxis);
+
+        for (int step = startStep;
+             gravitySign > 0 ? step <= endStep : step >= endStep;
+             step += gravitySign)
+        {
+            IVec3 candidate {
+                juce::jlimit (0, gridSize - 1, (int) std::round (next.x)),
+                juce::jlimit (0, gridSize - 1, (int) std::round (next.y)),
+                juce::jlimit (0, gridSize - 1, (int) std::round (next.z))
+            };
+            setAxisValue (candidate, gravityVector, step);
+
+            if (! isInside (candidate) || ! network.hasPipe (candidate))
                 continue;
 
             flow.position = candidate;
@@ -1369,7 +1434,7 @@ private:
                 return;
             }
 
-            const auto exits = network.validConnectedBits (candidate, bitPY);
+            const auto exits = network.validConnectedBits (candidate, oppositeBit (bitForVector (gravityVector)));
             if (! exits.empty())
             {
                 flow.direction = exits[(size_t) juce::Random::getSystemRandom().nextInt ((int) exits.size())];
@@ -1385,9 +1450,14 @@ private:
             return;
         }
 
-        flow.fallPosition.y = nextY;
+        flow.fallPosition = next;
 
-        if (flow.fallPosition.y <= 0.0f)
+        const auto floorValue = gravitySign > 0 ? (float) (gridSize - 1) : 0.0f;
+        const auto hitFloor = gravitySign > 0
+                                ? axisValue (flow.fallPosition, gravityVector) >= floorValue
+                                : axisValue (flow.fallPosition, gravityVector) <= floorValue;
+
+        if (hitFloor)
         {
             flow.dead = true;
             setStatus ("Water hit the floor");
@@ -2011,9 +2081,8 @@ private:
         {
             setPlaying (false);
             network.loadDemo();
-            selectedFace = 0;
+            setSelectedFace (0);
             selectedDepth = 0;
-            faceBox.setSelectedId (1, juce::dontSendNotification);
             layerSlider.setValue (1.0, juce::dontSendNotification);
             setStatus ("Demo loaded");
             repaint();
@@ -2031,10 +2100,7 @@ private:
             {
                 if (button == &faceButtons[(size_t) i])
                 {
-                    selectedFace = i;
-                    faceBox.setSelectedItemIndex (i, juce::dontSendNotification);
-                    updateButtonStates();
-                    repaint();
+                    setSelectedFace (i);
                     return;
                 }
             }
@@ -2060,13 +2126,12 @@ private:
     {
         if (comboBoxThatHasChanged == &faceBox)
         {
-            selectedFace = juce::jlimit (0, 5, faceBox.getSelectedItemIndex());
-            repaint();
+            setSelectedFace (faceBox.getSelectedItemIndex());
         }
     }
 };
 
-class PipeGridMusicApplication final : public juce::JUCEApplication
+class PipeApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return JUCE_APPLICATION_NAME_STRING; }
@@ -2116,4 +2181,4 @@ private:
 };
 }
 
-START_JUCE_APPLICATION (PipeGridMusicApplication)
+START_JUCE_APPLICATION (PipeApplication)
