@@ -686,6 +686,7 @@ public:
 };
 
 class MainComponent final : public juce::AudioAppComponent,
+                            public juce::MenuBarModel,
                             private juce::Timer,
                             private juce::Button::Listener,
                             private juce::Slider::Listener,
@@ -728,14 +729,37 @@ public:
 
         network.loadDemo();
         updateButtonStates();
+        juce::MenuBarModel::setMacMainMenu (this);
         startTimerHz (60);
         setAudioChannels (0, 2);
     }
 
     ~MainComponent() override
     {
+        juce::MenuBarModel::setMacMainMenu (nullptr);
         shutdownAudio();
         setLookAndFeel (nullptr);
+    }
+
+    juce::StringArray getMenuBarNames() override
+    {
+        return { "View" };
+    }
+
+    juce::PopupMenu getMenuForIndex (int, const juce::String&) override
+    {
+        juce::PopupMenu menu;
+        menu.addItem (mainViewMenuId, "Main View", true, ! large3DView);
+        menu.addItem (large3DViewMenuId, "Large 3D View", true, large3DView);
+        return menu;
+    }
+
+    void menuItemSelected (int menuItemID, int) override
+    {
+        if (menuItemID == mainViewMenuId)
+            setLarge3DView (false);
+        else if (menuItemID == large3DViewMenuId)
+            setLarge3DView (true);
     }
 
     void prepareToPlay (int, double sampleRate) override
@@ -851,7 +875,10 @@ public:
         auto nav = layout.preview.reduced (18, 20).toFloat();
         nav.removeFromTop (28.0f);
         nav.removeFromTop (18.0f);
-        const auto cardSide = juce::jmin (nav.getWidth(), nav.getHeight(), 360.0f);
+        const auto reservedForControls = large3DView ? 150.0f : 180.0f;
+        const auto cardSide = juce::jmin (nav.getWidth(),
+                                          juce::jmax (220.0f, nav.getHeight() - reservedForControls),
+                                          large3DView ? 560.0f : 360.0f);
         const auto card = juce::Rectangle<float> (cardSide, cardSide)
                             .withCentre ({ nav.getCentreX(), nav.getY() + cardSide * 0.5f });
 
@@ -1046,6 +1073,10 @@ private:
     std::vector<Voice> voices;
 
     juce::String status = "Ready";
+    bool large3DView = false;
+
+    static constexpr int mainViewMenuId = 1001;
+    static constexpr int large3DViewMenuId = 1002;
 
     void setupButton (juce::TextButton& button, const juce::String& text, const juce::String& tooltip)
     {
@@ -1075,7 +1106,9 @@ private:
 
         layout.tools = bounds.removeFromLeft (88);
 
-        const auto previewWidth = juce::jlimit (300, 420, bounds.getWidth() / 4);
+        const auto previewWidth = large3DView
+                                    ? juce::jlimit (520, 780, (int) std::round ((double) bounds.getWidth() * 0.56))
+                                    : juce::jlimit (300, 420, bounds.getWidth() / 4);
         layout.preview = bounds.removeFromRight (previewWidth);
         layout.editor = bounds;
 
@@ -1085,6 +1118,17 @@ private:
         layout.grid = juce::Rectangle<int> (side, side).withCentre (gridArea.getCentre());
 
         return layout;
+    }
+
+    void setLarge3DView (bool shouldUseLarge3DView)
+    {
+        if (large3DView == shouldUseLarge3DView)
+            return;
+
+        large3DView = shouldUseLarge3DView;
+        setStatus (large3DView ? "Large 3D view" : "Main view");
+        resized();
+        repaint();
     }
 
     void setTool (Tool tool)
@@ -1900,7 +1944,10 @@ private:
         auto titleArea = panel.removeFromTop (28.0f);
         panel.removeFromTop (18.0f);
 
-        const auto cardSide = juce::jmin (panel.getWidth(), panel.getHeight(), 360.0f);
+        const auto reservedForControls = large3DView ? 150.0f : 180.0f;
+        const auto cardSide = juce::jmin (panel.getWidth(),
+                                          juce::jmax (220.0f, panel.getHeight() - reservedForControls),
+                                          large3DView ? 560.0f : 360.0f);
         const auto card = juce::Rectangle<float> (cardSide, cardSide)
                             .withCentre ({ panel.getCentreX(), panel.getY() + cardSide * 0.5f });
         const auto area = card.reduced (30.0f, 28.0f);
