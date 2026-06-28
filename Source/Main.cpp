@@ -1096,6 +1096,9 @@ public:
             return true;
         }
 
+        if (key == juce::KeyPress::backspaceKey || key == juce::KeyPress::deleteKey)
+            return deleteSelectedCell();
+
         if (text == '[')
         {
             selectedDepth = juce::jmax (0, selectedDepth - 1);
@@ -1483,6 +1486,18 @@ private:
             setStatus ("Valve note " + noteName (valve->midiNote));
             repaint();
         }
+    }
+
+    bool deleteSelectedCell()
+    {
+        if (selectedTool != Tool::select || ! selectedCell.has_value())
+            return false;
+
+        network.eraseVoxel (cellToVoxel (selectedFace, selectedDepth, *selectedCell));
+        updateInspectorControls();
+        setStatus ("Selection deleted");
+        repaint();
+        return true;
     }
 
     std::optional<Cell> cellFromPosition (juce::Point<float> position) const

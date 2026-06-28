@@ -32,4 +32,4 @@ build/pipe_artefacts/Debug/pipe.app
 - Use the File menu to save or load patches as JSON.
 - `DEMO` reloads the starter patch; `CLEAR` empties the grid.
 
-Keyboard shortcuts: `1` select, `2` pipe, `3` tap, `4` valve, `5` drain, `E` erase, space play/stop, `[` and `]` change layer.
+Keyboard shortcuts: `1` select, `2` pipe, `3` tap, `4` valve, `5` drain, `E` erase, backspace/delete removes the selected cell in select mode, space play/stop, `[` and `]` change layer.
