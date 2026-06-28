@@ -869,6 +869,8 @@ public:
 
         if (menuName == "File")
         {
+            menu.addItem (newPatchMenuId, "New");
+            menu.addSeparator();
             menu.addItem (savePatchMenuId, "Save Patch...");
             menu.addItem (loadPatchMenuId, "Load Patch...");
             menu.addSeparator();
@@ -902,7 +904,9 @@ public:
 
     void menuItemSelected (int menuItemID, int) override
     {
-        if (menuItemID == savePatchMenuId)
+        if (menuItemID == newPatchMenuId)
+            newPatch();
+        else if (menuItemID == savePatchMenuId)
             savePatchAs();
         else if (menuItemID == loadPatchMenuId)
             loadPatch();
@@ -1480,6 +1484,7 @@ private:
     static constexpr int savePatchMenuId = 9001;
     static constexpr int loadPatchMenuId = 9002;
     static constexpr int loadDemoMenuId = 9003;
+    static constexpr int newPatchMenuId = 9004;
     static constexpr int internalSoundModeMenuId = 9501;
     static constexpr int superColliderSoundModeMenuId = 9502;
     static constexpr int mainViewMenuId = 1001;
@@ -1667,6 +1672,17 @@ private:
         layerSlider.setValue (1.0, juce::dontSendNotification);
         updateInspectorControls();
         setStatus ("Demo loaded");
+        repaint();
+    }
+
+    void newPatch()
+    {
+        setPlaying (false);
+        beginChange();
+        network.clear();
+        selectedCell.reset();
+        updateInspectorControls();
+        setStatus ("New patch");
         repaint();
     }
 
@@ -3403,15 +3419,7 @@ private:
         else if (button == &loadScButton) loadScProgram();
         else if (button == &saveScButton) saveScProgram();
         else if (button == &clearButton)
-        {
-            setPlaying (false);
-            beginChange();
-            network.clear();
-            selectedCell.reset();
-            updateInspectorControls();
-            setStatus ("Cleared");
-            repaint();
-        }
+            newPatch();
         else
         {
             for (int i = 0; i < (int) faceButtons.size(); ++i)

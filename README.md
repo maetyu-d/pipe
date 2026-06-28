@@ -35,7 +35,7 @@ build/pipe_artefacts/Debug/pipe.app
 - Water now shapes the sound: valve notes pan by position, brighten with height and movement, and hit harder when water falls from a drain.
 - While playing, click an existing tap to turn it on or off without deleting it.
 - While playing, click an existing drain to open or close it without deleting it.
-- Use the File menu to save/load patches or reload the demo patch.
-- `CLEAR` empties the grid.
+- Use the File menu to create a new patch, save/load patches, or reload the demo patch.
+- `CLEAR` also starts a new empty patch.
 
 Keyboard shortcuts: `1` select, `2` pipe, `3` tap, `4` valve, `5` drain, `E` erase, command-Z undo, command-shift-Z redo, backspace/delete removes the selected cell in select mode, space play/stop, `[` and `]` change layer.
