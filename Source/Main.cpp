@@ -2010,7 +2010,7 @@ private:
 
         g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
         g.setColour (PipeLookAndFeel::mint);
-        g.drawFittedText ("3D rainbow - " + juce::String (faces[(size_t) selectedFace].name),
+        g.drawFittedText ("3D - " + juce::String (faces[(size_t) selectedFace].name),
                           titleArea.toNearestInt(),
                           juce::Justification::centredLeft,
                           1);
