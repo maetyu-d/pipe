@@ -885,21 +885,21 @@ public:
         }
         else if (menuName == "Mode")
         {
-            menu.addItem (internalSoundModeMenuId, "JUCE Sound", true, soundMode == SoundMode::internal);
-            menu.addItem (superColliderSoundModeMenuId, "SuperCollider Sound", true, soundMode == SoundMode::superCollider);
+            addTickedMenuItem (menu, internalSoundModeMenuId, "JUCE Sound", soundMode == SoundMode::internal);
+            addTickedMenuItem (menu, superColliderSoundModeMenuId, "SuperCollider Sound", soundMode == SoundMode::superCollider);
         }
         else if (menuName == "View")
         {
             if (soundMode == SoundMode::superCollider)
             {
-                menu.addItem (mainViewMenuId, "Main View", true, scViewMode == ScViewMode::balanced);
-                menu.addItem (large3DViewMenuId, "Large 3D View", true, scViewMode == ScViewMode::large3D);
-                menu.addItem (largeCodeViewMenuId, "Large Code View", true, scViewMode == ScViewMode::largeCode);
+                addTickedMenuItem (menu, mainViewMenuId, "Main View", scViewMode == ScViewMode::balanced);
+                addTickedMenuItem (menu, large3DViewMenuId, "Large 3D View", scViewMode == ScViewMode::large3D);
+                addTickedMenuItem (menu, largeCodeViewMenuId, "Large Code View", scViewMode == ScViewMode::largeCode);
             }
             else
             {
-                menu.addItem (mainViewMenuId, "Main View", true, ! large3DView);
-                menu.addItem (large3DViewMenuId, "Large 3D View", true, large3DView);
+                addTickedMenuItem (menu, mainViewMenuId, "Main View", ! large3DView);
+                addTickedMenuItem (menu, large3DViewMenuId, "Large 3D View", large3DView);
             }
         }
 
@@ -1319,6 +1319,15 @@ private:
 
     PipeLookAndFeel lookAndFeel;
     PipeNetwork network;
+
+    static void addTickedMenuItem (juce::PopupMenu& menu, int itemId, const juce::String& text, bool ticked)
+    {
+        juce::PopupMenu::Item item { text };
+        item.itemID = itemId;
+        item.isEnabled = true;
+        item.isTicked = ticked;
+        menu.addItem (std::move (item));
+    }
 
     juce::ComboBox faceBox;
     juce::ComboBox keyBox;
