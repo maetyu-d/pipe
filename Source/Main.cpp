@@ -627,6 +627,16 @@ struct Voice
     double phase = 0.0;
     double age = 0.0;
     double level = 0.075;
+    double brightness = 0.12;
+    double pan = 0.0;
+};
+
+struct NoteEvent
+{
+    double frequency = 440.0;
+    double level = 0.075;
+    double brightness = 0.12;
+    double pan = 0.0;
 };
 
 class PipeLookAndFeel final : public juce::LookAndFeel_V4
@@ -765,6 +775,24 @@ public:
         addAndMakeVisible (faceBox);
         faceBox.setVisible (false);
 
+        static constexpr std::array<const char*, 12> noteNames {{
+            "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"
+        }};
+        for (int i = 0; i < (int) noteNames.size(); ++i)
+            keyBox.addItem (noteNames[(size_t) i], i + 1);
+        keyBox.setSelectedId (1, juce::dontSendNotification);
+        keyBox.addListener (this);
+        addAndMakeVisible (keyBox);
+
+        scaleBox.addItem ("Major", 1);
+        scaleBox.addItem ("Minor", 2);
+        scaleBox.addItem ("Pentatonic", 3);
+        scaleBox.addItem ("Dorian", 4);
+        scaleBox.addItem ("Whole", 5);
+        scaleBox.setSelectedId (3, juce::dontSendNotification);
+        scaleBox.addListener (this);
+        addAndMakeVisible (scaleBox);
+
         for (int i = 0; i < (int) faceButtons.size(); ++i)
             setupButton (faceButtons[(size_t) i], faces[(size_t) i].name, "Show this cube face in the 2D editor");
 
@@ -853,7 +881,7 @@ public:
     {
         bufferToFill.clearActiveBufferRegion();
 
-        std::vector<double> pending;
+        std::vector<NoteEvent> pending;
         {
             const juce::ScopedLock lock (noteLock);
             pending.swap (pendingNotes);
@@ -861,12 +889,12 @@ public:
 
         constexpr size_t maxVoices = 40;
 
-        for (const auto frequency : pending)
+        for (const auto& event : pending)
         {
             if (voices.size() >= maxVoices)
                 voices.erase (voices.begin());
 
-            voices.push_back ({ frequency, 0.0, 0.0, 0.075 });
+            voices.push_back ({ event.frequency, 0.0, 0.0, event.level, event.brightness, event.pan });
         }
 
         if (voices.empty())
@@ -881,15 +909,20 @@ public:
 
         for (int sample = 0; sample < bufferToFill.numSamples; ++sample)
         {
-            double value = 0.0;
+            double leftValue = 0.0;
+            double rightValue = 0.0;
 
             for (auto& voice : voices)
             {
                 const auto attack = 1.0 - std::exp (-voice.age * 90.0);
                 const auto decay = std::exp (-voice.age * 5.2);
                 const auto envelope = attack * decay;
-                value += std::sin (voice.phase) * envelope * voice.level;
-                value += std::sin (voice.phase * 2.01) * envelope * voice.level * 0.12;
+                auto value = std::sin (voice.phase) * envelope * voice.level;
+                value += std::sin (voice.phase * 2.01) * envelope * voice.level * voice.brightness;
+
+                const auto pan = juce::jlimit (-1.0, 1.0, voice.pan);
+                leftValue += value * (0.72 - pan * 0.28);
+                rightValue += value * (0.72 + pan * 0.28);
 
                 voice.phase += twoPi * voice.frequency / currentSampleRate;
                 if (voice.phase > twoPi)
@@ -898,10 +931,9 @@ public:
                 voice.age += 1.0 / currentSampleRate;
             }
 
-            const auto out = (float) std::tanh (value * 0.72);
-            left[sample] += out;
+            left[sample] += (float) std::tanh (leftValue * 0.72);
             if (right != nullptr)
-                right[sample] += out;
+                right[sample] += (float) std::tanh (rightValue * 0.72);
         }
 
         voices.erase (std::remove_if (voices.begin(), voices.end(),
@@ -928,6 +960,10 @@ public:
         auto top = layout.top.reduced (14, 10);
         top.removeFromLeft (154);
         tempoSlider.setBounds (top.removeFromLeft (168));
+        top.removeFromLeft (12);
+        keyBox.setBounds (top.removeFromLeft (62));
+        top.removeFromLeft (6);
+        scaleBox.setBounds (top.removeFromLeft (116));
         top.removeFromLeft (12);
         playButton.setBounds (top.removeFromLeft (72));
         top.removeFromLeft (6);
@@ -1165,6 +1201,8 @@ private:
     PipeNetwork network;
 
     juce::ComboBox faceBox;
+    juce::ComboBox keyBox;
+    juce::ComboBox scaleBox;
     std::array<juce::TextButton, 6> faceButtons;
     juce::Slider layerSlider;
     juce::Slider tempoSlider;
@@ -1185,6 +1223,8 @@ private:
     Tool selectedTool = Tool::select;
     int selectedFace = 0;
     int selectedDepth = 0;
+    int rootNote = 0;
+    int scaleIndex = 2;
     bool drawingPipe = false;
     bool drewPipeSegment = false;
     std::optional<Cell> pipeStartCell;
@@ -1203,7 +1243,7 @@ private:
 
     double currentSampleRate = 44100.0;
     juce::CriticalSection noteLock;
-    std::vector<double> pendingNotes;
+    std::vector<NoteEvent> pendingNotes;
     std::vector<Voice> voices;
 
     juce::String status = "Ready";
@@ -1291,6 +1331,8 @@ private:
         root->setProperty ("face", selectedFace);
         root->setProperty ("layer", selectedDepth);
         root->setProperty ("tempo", bpm);
+        root->setProperty ("rootNote", rootNote);
+        root->setProperty ("scale", scaleIndex);
 
         return root;
     }
@@ -1327,7 +1369,11 @@ private:
         selectedDepth = juce::jlimit (0, gridSize - 1, (int) patch.getProperty ("layer", selectedDepth));
         selectedCell.reset();
         bpm = juce::jlimit (40.0, 220.0, (double) patch.getProperty ("tempo", bpm));
+        rootNote = juce::jlimit (0, 11, (int) patch.getProperty ("rootNote", rootNote));
+        scaleIndex = juce::jlimit (0, 4, (int) patch.getProperty ("scale", scaleIndex));
         tempoSlider.setValue (bpm, juce::dontSendNotification);
+        keyBox.setSelectedItemIndex (rootNote, juce::dontSendNotification);
+        scaleBox.setSelectedItemIndex (scaleIndex, juce::dontSendNotification);
         layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
         setSelectedFace ((int) patch.getProperty ("face", selectedFace));
         setPlaying (false);
@@ -1547,6 +1593,63 @@ private:
         return juce::MidiMessage::getMidiNoteName (midiNote, true, true, 3);
     }
 
+    static juce::String scaleNameForIndex (int index)
+    {
+        static constexpr std::array<const char*, 5> names {{
+            "Major", "Minor", "Pentatonic", "Dorian", "Whole"
+        }};
+        return names[(size_t) juce::jlimit (0, (int) names.size() - 1, index)];
+    }
+
+    const std::vector<int>& currentScale() const
+    {
+        static const std::vector<int> major { 0, 2, 4, 5, 7, 9, 11 };
+        static const std::vector<int> minor { 0, 2, 3, 5, 7, 8, 10 };
+        static const std::vector<int> pentatonic { 0, 2, 4, 7, 9 };
+        static const std::vector<int> dorian { 0, 2, 3, 5, 7, 9, 10 };
+        static const std::vector<int> whole { 0, 2, 4, 6, 8, 10 };
+
+        switch (scaleIndex)
+        {
+            case 0: return major;
+            case 1: return minor;
+            case 2: return pentatonic;
+            case 3: return dorian;
+            default: return whole;
+        }
+    }
+
+    int noteInCurrentScale (int midiNote) const
+    {
+        const auto& scale = currentScale();
+        const auto octave = juce::jlimit (1, 8, midiNote / 12);
+        const auto noteClass = (midiNote % 12 + 12) % 12;
+
+        auto bestNote = rootNote + 12 * octave;
+        auto bestDistance = 128;
+
+        for (int octaveOffset = -1; octaveOffset <= 1; ++octaveOffset)
+        {
+            for (const auto degree : scale)
+            {
+                const auto candidate = rootNote + degree + 12 * (octave + octaveOffset);
+                const auto distance = std::abs (candidate - midiNote);
+                if (distance < bestDistance || (distance == bestDistance && ((candidate % 12 + 12) % 12) == noteClass))
+                {
+                    bestDistance = distance;
+                    bestNote = candidate;
+                }
+            }
+        }
+
+        return juce::jlimit (24, 96, bestNote);
+    }
+
+    int defaultMusicalNoteFor (IVec3 voxel) const
+    {
+        return noteInCurrentScale (defaultValveNoteFor (voxel));
+    }
+
     void updateInspectorControls()
     {
         const auto hasValve = selectedValve() != nullptr;
@@ -1624,7 +1727,11 @@ private:
         else if (selectedTool == Tool::valve)
         {
             beginChange();
+            const auto hadValve = network.hasValve (voxel);
             network.toggleValve (voxel);
+            if (! hadValve)
+                if (auto* valve = network.valveAt (voxel))
+                    valve->midiNote = defaultMusicalNoteFor (voxel);
             setStatus (network.hasValve (voxel) ? "Valve added" : "Valve removed");
         }
         else if (selectedTool == Tool::drain)
@@ -1814,7 +1921,7 @@ private:
         flow.position = next;
 
         if (network.hasValve (flow.position))
-            triggerValve (flow.position);
+            triggerValve (flow.position, flow);
 
         if (network.isDrainOpen (flow.position))
         {
@@ -1896,7 +2003,7 @@ private:
             flow.progress = 0.0;
 
             if (network.hasValve (candidate))
-                triggerValve (candidate);
+                triggerValve (candidate, flow);
 
             if (network.isDrainOpen (candidate))
             {
@@ -1934,14 +2041,24 @@ private:
         }
     }
 
-    void triggerValve (IVec3 voxel)
+    void triggerValve (IVec3 voxel, const Flow& flow)
     {
         const auto* valve = network.valveAt (voxel);
-        const auto midiNote = valve != nullptr ? valve->midiNote : defaultValveNoteFor (voxel);
+        const auto rawMidiNote = valve != nullptr ? valve->midiNote : defaultMusicalNoteFor (voxel);
+        const auto midiNote = noteInCurrentScale (rawMidiNote);
         const auto frequency = juce::MidiMessage::getMidiNoteInHertz (midiNote);
+        const auto exits = (double) network.validConnectedBits (voxel).size();
+        const auto height = (double) voxel.y / (double) (gridSize - 1);
+        const auto travelEnergy = juce::jlimit (0.0, 1.0, flow.progress);
+
+        NoteEvent event;
+        event.frequency = frequency;
+        event.level = juce::jlimit (0.035, 0.12, 0.052 + exits * 0.008 + (flow.falling ? 0.026 : 0.0));
+        event.brightness = juce::jlimit (0.06, 0.42, 0.10 + height * 0.16 + travelEnergy * 0.08 + (flow.falling ? 0.10 : 0.0));
+        event.pan = juce::jlimit (-0.85, 0.85, ((double) voxel.x / (double) (gridSize - 1)) * 1.7 - 0.85);
 
         const juce::ScopedLock lock (noteLock);
-        pendingNotes.push_back (frequency);
+        pendingNotes.push_back (event);
     }
 
     FVec3 currentFlowPosition (const Flow& flow) const
@@ -1985,6 +2102,8 @@ private:
         g.setFont (juce::FontOptions (9.0f));
         g.setColour (PipeLookAndFeel::muted.withAlpha (0.80f));
         g.drawFittedText ("Tempo", tempoSlider.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
+        g.drawFittedText ("Key", keyBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
+        g.drawFittedText ("Scale", scaleBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
     }
 
     void drawToolRail (juce::Graphics& g, const Layout& layout)
@@ -2602,7 +2721,7 @@ private:
         if (const auto* valve = selectedValve())
         {
             g.setColour (PipeLookAndFeel::pink.brighter (0.16f));
-            g.drawFittedText ("Note " + noteName (valve->midiNote),
+            g.drawFittedText ("Note " + noteName (noteInCurrentScale (valve->midiNote)),
                               area.removeFromTop (20.0f).toNearestInt(),
                               juce::Justification::centredLeft,
                               1);
@@ -2776,6 +2895,20 @@ private:
         if (comboBoxThatHasChanged == &faceBox)
         {
             setSelectedFace (faceBox.getSelectedItemIndex());
+        }
+        else if (comboBoxThatHasChanged == &keyBox)
+        {
+            rootNote = juce::jlimit (0, 11, keyBox.getSelectedItemIndex());
+            updateInspectorControls();
+            setStatus ("Key " + keyBox.getText());
+            repaint();
+        }
+        else if (comboBoxThatHasChanged == &scaleBox)
+        {
+            scaleIndex = juce::jlimit (0, 4, scaleBox.getSelectedItemIndex());
+            updateInspectorControls();
+            setStatus ("Scale " + scaleNameForIndex (scaleIndex));
+            repaint();
         }
     }
 };

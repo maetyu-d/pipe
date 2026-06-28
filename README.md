@@ -26,7 +26,9 @@ build/pipe_artefacts/Debug/pipe.app
 - Place `VALVE` markers as sounding points.
 - Place `DRAIN` markers to let droplets fall out of the pipework. Falling droplets drop twice as fast, disappear at the cube floor, and rejoin if they hit pipework below.
 - Click a cell to inspect it. If it contains a valve, use `NOTE -`, `NOTE +`, or the pitch slider to tune that valve.
+- Use the key and scale controls to keep valve notes in a shared musical mode.
 - Press `PLAY` to animate the water and hear valves.
+- Water now shapes the sound: valve notes pan by position, brighten with height and movement, and hit harder when water falls from a drain.
 - While playing, click an existing tap to turn it on or off without deleting it.
 - While playing, click an existing drain to open or close it without deleting it.
 - Use the File menu to save or load patches as JSON.
