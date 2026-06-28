@@ -105,6 +105,12 @@ struct Flow
     bool dead = false;
 };
 
+struct Valve
+{
+    IVec3 position;
+    int midiNote = 60;
+};
+
 int signOf (int value) noexcept
 {
     return (value > 0 ? 1 : 0) - (value < 0 ? 1 : 0);
@@ -288,13 +294,42 @@ bool containsPoint (const std::vector<IVec3>& points, IVec3 point)
     return std::find (points.begin(), points.end(), point) != points.end();
 }
 
+void eraseValve (std::vector<Valve>& valves, IVec3 point)
+{
+    valves.erase (std::remove_if (valves.begin(), valves.end(),
+                                  [point] (const Valve& valve) { return valve.position == point; }),
+                  valves.end());
+}
+
+Valve* findValve (std::vector<Valve>& valves, IVec3 point)
+{
+    const auto iter = std::find_if (valves.begin(), valves.end(),
+                                    [point] (const Valve& valve) { return valve.position == point; });
+    return iter == valves.end() ? nullptr : &(*iter);
+}
+
+const Valve* findValve (const std::vector<Valve>& valves, IVec3 point)
+{
+    const auto iter = std::find_if (valves.begin(), valves.end(),
+                                    [point] (const Valve& valve) { return valve.position == point; });
+    return iter == valves.end() ? nullptr : &(*iter);
+}
+
+int defaultValveNoteFor (IVec3 voxel)
+{
+    static constexpr std::array<int, 7> scale { 0, 2, 3, 5, 7, 9, 10 };
+    const auto degree = (voxel.x + voxel.z * 2 + voxel.y) % (int) scale.size();
+    const auto octave = juce::jlimit (0, 2, voxel.y / 4);
+    return 45 + octave * 12 + scale[(size_t) degree];
+}
+
 class PipeNetwork
 {
 public:
     std::array<uint8_t, voxelCount> pipes {};
     std::vector<IVec3> taps;
     std::vector<IVec3> disabledTaps;
-    std::vector<IVec3> valves;
+    std::vector<Valve> valves;
     std::vector<IVec3> drains;
     std::vector<IVec3> closedDrains;
 
@@ -325,7 +360,17 @@ public:
 
     bool hasValve (IVec3 voxel) const
     {
-        return containsPoint (valves, voxel);
+        return findValve (valves, voxel) != nullptr;
+    }
+
+    Valve* valveAt (IVec3 voxel)
+    {
+        return findValve (valves, voxel);
+    }
+
+    const Valve* valveAt (IVec3 voxel) const
+    {
+        return findValve (valves, voxel);
     }
 
     bool hasDrain (IVec3 voxel) const
@@ -347,7 +392,7 @@ public:
         }
         else
         {
-            erasePoint (valves, voxel);
+            eraseValve (valves, voxel);
             erasePoint (drains, voxel);
             erasePoint (closedDrains, voxel);
             taps.push_back (voxel);
@@ -371,14 +416,14 @@ public:
     void toggleValve (IVec3 voxel)
     {
         if (hasValve (voxel))
-            erasePoint (valves, voxel);
+            eraseValve (valves, voxel);
         else
         {
             erasePoint (taps, voxel);
             erasePoint (disabledTaps, voxel);
             erasePoint (drains, voxel);
             erasePoint (closedDrains, voxel);
-            valves.push_back (voxel);
+            valves.push_back ({ voxel, defaultValveNoteFor (voxel) });
         }
     }
 
@@ -393,7 +438,7 @@ public:
         {
             erasePoint (taps, voxel);
             erasePoint (disabledTaps, voxel);
-            erasePoint (valves, voxel);
+            eraseValve (valves, voxel);
             drains.push_back (voxel);
             erasePoint (closedDrains, voxel);
         }
@@ -455,7 +500,7 @@ public:
         pipes[index] = 0;
         erasePoint (taps, voxel);
         erasePoint (disabledTaps, voxel);
-        erasePoint (valves, voxel);
+        eraseValve (valves, voxel);
         erasePoint (drains, voxel);
         erasePoint (closedDrains, voxel);
     }
@@ -561,8 +606,15 @@ public:
 
         taps = { { 1, 9, 11 }, { 10, 3, 11 }, { 2, 9, 5 } };
         disabledTaps.clear();
-        valves = { { 4, 9, 11 }, { 8, 9, 11 }, { 10, 6, 11 }, { 6, 3, 11 },
-                   { 6, 9, 8 }, { 9, 7, 5 }, { 8, 7, 8 } };
+        valves = {
+            { { 4, 9, 11 }, defaultValveNoteFor ({ 4, 9, 11 }) },
+            { { 8, 9, 11 }, defaultValveNoteFor ({ 8, 9, 11 }) },
+            { { 10, 6, 11 }, defaultValveNoteFor ({ 10, 6, 11 }) },
+            { { 6, 3, 11 }, defaultValveNoteFor ({ 6, 3, 11 }) },
+            { { 6, 9, 8 }, defaultValveNoteFor ({ 6, 9, 8 }) },
+            { { 9, 7, 5 }, defaultValveNoteFor ({ 9, 7, 5 }) },
+            { { 8, 7, 8 }, defaultValveNoteFor ({ 8, 7, 8 }) }
+        };
         drains = { { 10, 9, 11 }, { 6, 9, 5 } };
         closedDrains.clear();
     }
@@ -726,6 +778,10 @@ public:
         setupButton (stopButton, "STOP", "Stop water flow");
         setupButton (demoButton, "DEMO", "Reload the starter patch");
         setupButton (clearButton, "CLEAR", "Clear every pipe, tap, valve and drain");
+        setupButton (noteDownButton, "NOTE -", "Lower the selected valve note");
+        setupButton (noteUpButton, "NOTE +", "Raise the selected valve note");
+        noteDownButton.setVisible (false);
+        noteUpButton.setVisible (false);
 
         network.loadDemo();
         updateButtonStates();
@@ -743,20 +799,34 @@ public:
 
     juce::StringArray getMenuBarNames() override
     {
-        return { "View" };
+        return { "File", "View" };
     }
 
-    juce::PopupMenu getMenuForIndex (int, const juce::String&) override
+    juce::PopupMenu getMenuForIndex (int, const juce::String& menuName) override
     {
         juce::PopupMenu menu;
-        menu.addItem (mainViewMenuId, "Main View", true, ! large3DView);
-        menu.addItem (large3DViewMenuId, "Large 3D View", true, large3DView);
+
+        if (menuName == "File")
+        {
+            menu.addItem (savePatchMenuId, "Save Patch...");
+            menu.addItem (loadPatchMenuId, "Load Patch...");
+        }
+        else if (menuName == "View")
+        {
+            menu.addItem (mainViewMenuId, "Main View", true, ! large3DView);
+            menu.addItem (large3DViewMenuId, "Large 3D View", true, large3DView);
+        }
+
         return menu;
     }
 
     void menuItemSelected (int menuItemID, int) override
     {
-        if (menuItemID == mainViewMenuId)
+        if (menuItemID == savePatchMenuId)
+            savePatchAs();
+        else if (menuItemID == loadPatchMenuId)
+            loadPatch();
+        else if (menuItemID == mainViewMenuId)
             setLarge3DView (false);
         else if (menuItemID == large3DViewMenuId)
             setLarge3DView (true);
@@ -875,7 +945,7 @@ public:
         auto nav = layout.preview.reduced (18, 20).toFloat();
         nav.removeFromTop (28.0f);
         nav.removeFromTop (18.0f);
-        const auto reservedForControls = large3DView ? 150.0f : 180.0f;
+        const auto reservedForControls = large3DView ? 210.0f : 220.0f;
         const auto cardSide = juce::jmin (nav.getWidth(),
                                           juce::jmax (220.0f, nav.getHeight() - reservedForControls),
                                           large3DView ? 560.0f : 360.0f);
@@ -904,6 +974,13 @@ public:
         layerSlider.setSliderStyle (juce::Slider::LinearHorizontal);
         layerSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 42, 24);
         layerSlider.setBounds (layerArea);
+
+        auto noteArea = layerArea.withY (layerArea.getBottom() + 60).withHeight (34);
+        const auto noteGap = 8;
+        const auto noteW = (noteArea.getWidth() - noteGap) / 2;
+        noteDownButton.setBounds (noteArea.removeFromLeft (noteW));
+        noteArea.removeFromLeft (noteGap);
+        noteUpButton.setBounds (noteArea);
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -915,6 +992,8 @@ public:
             return;
 
         hoverCell = *cell;
+        selectedCell = *cell;
+        updateInspectorControls();
 
         if (playing)
         {
@@ -1008,6 +1087,7 @@ public:
         {
             selectedDepth = juce::jmax (0, selectedDepth - 1);
             layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
+            updateInspectorControls();
             repaint();
             return true;
         }
@@ -1016,6 +1096,7 @@ public:
         {
             selectedDepth = juce::jmin (gridSize - 1, selectedDepth + 1);
             layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
+            updateInspectorControls();
             repaint();
             return true;
         }
@@ -1051,6 +1132,8 @@ private:
     juce::TextButton stopButton;
     juce::TextButton demoButton;
     juce::TextButton clearButton;
+    juce::TextButton noteDownButton;
+    juce::TextButton noteUpButton;
 
     Tool selectedTool = Tool::pipe;
     int selectedFace = 0;
@@ -1059,6 +1142,7 @@ private:
     bool drewPipeSegment = false;
     std::optional<Cell> lastPipeCell;
     std::optional<Cell> hoverCell;
+    std::optional<Cell> selectedCell;
 
     bool playing = false;
     double bpm = 120.0;
@@ -1074,9 +1158,166 @@ private:
 
     juce::String status = "Ready";
     bool large3DView = false;
+    std::unique_ptr<juce::FileChooser> fileChooser;
 
+    static constexpr int savePatchMenuId = 9001;
+    static constexpr int loadPatchMenuId = 9002;
     static constexpr int mainViewMenuId = 1001;
     static constexpr int large3DViewMenuId = 1002;
+
+    static juce::var pointToVar (IVec3 point)
+    {
+        auto* object = new juce::DynamicObject();
+        object->setProperty ("x", point.x);
+        object->setProperty ("y", point.y);
+        object->setProperty ("z", point.z);
+        return object;
+    }
+
+    static std::optional<IVec3> pointFromVar (const juce::var& value)
+    {
+        if (! value.isObject())
+            return std::nullopt;
+
+        const IVec3 point {
+            (int) value.getProperty ("x", -1),
+            (int) value.getProperty ("y", -1),
+            (int) value.getProperty ("z", -1)
+        };
+
+        return isInside (point) ? std::optional<IVec3> (point) : std::nullopt;
+    }
+
+    juce::var makePointArray (const std::vector<IVec3>& points) const
+    {
+        juce::Array<juce::var> array;
+        for (const auto point : points)
+            array.add (pointToVar (point));
+        return array;
+    }
+
+    std::vector<IVec3> loadPointArray (const juce::var& value) const
+    {
+        std::vector<IVec3> points;
+
+        if (const auto* array = value.getArray())
+            for (const auto& item : *array)
+                if (const auto point = pointFromVar (item))
+                    points.push_back (*point);
+
+        return points;
+    }
+
+    juce::var createPatch() const
+    {
+        auto* root = new juce::DynamicObject();
+        root->setProperty ("version", 1);
+        root->setProperty ("size", gridSize);
+
+        juce::Array<juce::var> pipeArray;
+        for (const auto pipe : network.pipes)
+            pipeArray.add ((int) pipe);
+        root->setProperty ("pipes", pipeArray);
+
+        root->setProperty ("taps", makePointArray (network.taps));
+        root->setProperty ("disabledTaps", makePointArray (network.disabledTaps));
+        root->setProperty ("drains", makePointArray (network.drains));
+        root->setProperty ("closedDrains", makePointArray (network.closedDrains));
+
+        juce::Array<juce::var> valveArray;
+        for (const auto& valve : network.valves)
+        {
+            auto* object = new juce::DynamicObject();
+            object->setProperty ("x", valve.position.x);
+            object->setProperty ("y", valve.position.y);
+            object->setProperty ("z", valve.position.z);
+            object->setProperty ("note", valve.midiNote);
+            valveArray.add (object);
+        }
+        root->setProperty ("valves", valveArray);
+        root->setProperty ("face", selectedFace);
+        root->setProperty ("layer", selectedDepth);
+        root->setProperty ("tempo", bpm);
+
+        return root;
+    }
+
+    bool loadPatchFromVar (const juce::var& patch)
+    {
+        if (! patch.isObject() || (int) patch.getProperty ("size", 0) != gridSize)
+            return false;
+
+        PipeNetwork loaded;
+
+        if (const auto* pipeArray = patch.getProperty ("pipes", {}).getArray())
+        {
+            for (int i = 0; i < juce::jmin ((int) pipeArray->size(), voxelCount); ++i)
+                loaded.pipes[(size_t) i] = (uint8_t) juce::jlimit (0, 63, (int) (*pipeArray)[i]);
+        }
+
+        loaded.taps = loadPointArray (patch.getProperty ("taps", {}));
+        loaded.disabledTaps = loadPointArray (patch.getProperty ("disabledTaps", {}));
+        loaded.drains = loadPointArray (patch.getProperty ("drains", {}));
+        loaded.closedDrains = loadPointArray (patch.getProperty ("closedDrains", {}));
+
+        if (const auto* valves = patch.getProperty ("valves", {}).getArray())
+        {
+            for (const auto& item : *valves)
+            {
+                if (const auto point = pointFromVar (item))
+                    loaded.valves.push_back ({ *point, juce::jlimit (24, 96, (int) item.getProperty ("note", defaultValveNoteFor (*point))) });
+            }
+        }
+
+        network = std::move (loaded);
+        selectedDepth = juce::jlimit (0, gridSize - 1, (int) patch.getProperty ("layer", selectedDepth));
+        selectedCell.reset();
+        bpm = juce::jlimit (40.0, 220.0, (double) patch.getProperty ("tempo", bpm));
+        tempoSlider.setValue (bpm, juce::dontSendNotification);
+        layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
+        setSelectedFace ((int) patch.getProperty ("face", selectedFace));
+        setPlaying (false);
+        updateInspectorControls();
+        setStatus ("Patch loaded");
+        return true;
+    }
+
+    void savePatchAs()
+    {
+        fileChooser = std::make_unique<juce::FileChooser> ("Save patch",
+                                                           juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("pipe-patch.json"),
+                                                           "*.json");
+        fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                                  [this] (const juce::FileChooser& chooser)
+                                  {
+                                      const auto file = chooser.getResult();
+                                      if (file == juce::File())
+                                          return;
+
+                                      if (file.replaceWithText (juce::JSON::toString (createPatch(), true)))
+                                          setStatus ("Patch saved");
+                                      else
+                                          setStatus ("Could not save patch");
+                                  });
+    }
+
+    void loadPatch()
+    {
+        fileChooser = std::make_unique<juce::FileChooser> ("Load patch",
+                                                           juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                                                           "*.json");
+        fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                  [this] (const juce::FileChooser& chooser)
+                                  {
+                                      const auto file = chooser.getResult();
+                                      if (file == juce::File())
+                                          return;
+
+                                      const auto parsed = juce::JSON::parse (file);
+                                      if (! loadPatchFromVar (parsed))
+                                          setStatus ("Could not load patch");
+                                  });
+    }
 
     void setupButton (juce::TextButton& button, const juce::String& text, const juce::String& tooltip)
     {
@@ -1163,6 +1404,7 @@ private:
             updateGravityForSelectedFace();
 
         updateButtonStates();
+        updateInspectorControls();
         repaint();
     }
 
@@ -1183,6 +1425,48 @@ private:
     void setStatus (const juce::String& newStatus)
     {
         status = newStatus;
+    }
+
+    std::optional<IVec3> selectedVoxel() const
+    {
+        if (! selectedCell.has_value())
+            return std::nullopt;
+
+        return cellToVoxel (selectedFace, selectedDepth, *selectedCell);
+    }
+
+    Valve* selectedValve()
+    {
+        const auto voxel = selectedVoxel();
+        return voxel.has_value() ? network.valveAt (*voxel) : nullptr;
+    }
+
+    const Valve* selectedValve() const
+    {
+        const auto voxel = selectedVoxel();
+        return voxel.has_value() ? network.valveAt (*voxel) : nullptr;
+    }
+
+    static juce::String noteName (int midiNote)
+    {
+        return juce::MidiMessage::getMidiNoteName (midiNote, true, true, 3);
+    }
+
+    void updateInspectorControls()
+    {
+        const auto hasValve = selectedValve() != nullptr;
+        noteDownButton.setVisible (hasValve);
+        noteUpButton.setVisible (hasValve);
+    }
+
+    void adjustSelectedValveNote (int semitones)
+    {
+        if (auto* valve = selectedValve())
+        {
+            valve->midiNote = juce::jlimit (24, 96, valve->midiNote + semitones);
+            setStatus ("Valve note " + noteName (valve->midiNote));
+            repaint();
+        }
     }
 
     std::optional<Cell> cellFromPosition (juce::Point<float> position) const
@@ -1222,6 +1506,7 @@ private:
             setStatus ("Cell erased");
         }
 
+        updateInspectorControls();
         repaint();
     }
 
@@ -1510,10 +1795,8 @@ private:
 
     void triggerValve (IVec3 voxel)
     {
-        static constexpr std::array<int, 7> scale { 0, 2, 3, 5, 7, 9, 10 };
-        const auto degree = (voxel.x + voxel.z * 2 + voxel.y) % (int) scale.size();
-        const auto octave = juce::jlimit (0, 2, voxel.y / 4);
-        const auto midiNote = 45 + octave * 12 + scale[(size_t) degree];
+        const auto* valve = network.valveAt (voxel);
+        const auto midiNote = valve != nullptr ? valve->midiNote : defaultValveNoteFor (voxel);
         const auto frequency = juce::MidiMessage::getMidiNoteInHertz (midiNote);
 
         const juce::ScopedLock lock (noteLock);
@@ -1623,6 +1906,15 @@ private:
             g.fillRoundedRectangle (hover, 8.0f);
             g.setColour (PipeLookAndFeel::aqua.withAlpha (0.85f));
             g.drawRoundedRectangle (hover, 8.0f, 1.4f);
+        }
+
+        if (selectedCell.has_value())
+        {
+            const auto selected = cellBounds (grid, cell, *selectedCell).reduced (3.5f);
+            g.setColour (PipeLookAndFeel::pink.withAlpha (0.12f));
+            g.fillRoundedRectangle (selected, 7.0f);
+            g.setColour (PipeLookAndFeel::pink.withAlpha (0.90f));
+            g.drawRoundedRectangle (selected, 7.0f, 1.7f);
         }
     }
 
@@ -1805,7 +2097,7 @@ private:
 
         for (const auto valve : network.valves)
         {
-            if (const auto display = voxelToCellOnFaceDepth (selectedFace, selectedDepth, valve))
+            if (const auto display = voxelToCellOnFaceDepth (selectedFace, selectedDepth, valve.position))
             {
                 const auto centre = cellCentre (grid, cell, *display);
                 const auto radius = cell * 0.20f;
@@ -1998,7 +2290,7 @@ private:
         auto titleArea = panel.removeFromTop (28.0f);
         panel.removeFromTop (18.0f);
 
-        const auto reservedForControls = large3DView ? 150.0f : 180.0f;
+        const auto reservedForControls = large3DView ? 210.0f : 220.0f;
         const auto cardSide = juce::jmin (panel.getWidth(),
                                           juce::jmax (220.0f, panel.getHeight() - reservedForControls),
                                           large3DView ? 560.0f : 360.0f);
@@ -2086,6 +2378,52 @@ private:
                           layerLabel.toNearestInt(),
                           juce::Justification::centredLeft,
                           1);
+
+        drawInspector (g, card);
+    }
+
+    void drawInspector (juce::Graphics& g, juce::Rectangle<float> card) const
+    {
+        auto area = juce::Rectangle<float> (card.getX(),
+                                            card.getBottom() + 186.0f,
+                                            card.getWidth(),
+                                            48.0f);
+
+        g.setFont (juce::FontOptions (9.0f).withStyle ("Bold"));
+        g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
+        g.drawFittedText ("SELECTED", area.removeFromTop (14.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+
+        g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
+        g.setColour (PipeLookAndFeel::ink.withAlpha (0.92f));
+
+        const auto voxel = selectedVoxel();
+        if (! voxel.has_value())
+        {
+            g.drawFittedText ("No cell", area.removeFromTop (18.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+            return;
+        }
+
+        const auto& v = *voxel;
+        auto firstLine = "X" + juce::String (v.x + 1).paddedLeft ('0', 2)
+                       + "  Y" + juce::String (v.y + 1).paddedLeft ('0', 2)
+                       + "  Z" + juce::String (v.z + 1).paddedLeft ('0', 2);
+
+        if (network.hasTap (v)) firstLine += network.isTapEnabled (v) ? "  tap on" : "  tap off";
+        else if (network.hasDrain (v)) firstLine += network.isDrainOpen (v) ? "  drain open" : "  drain shut";
+        else if (network.hasValve (v)) firstLine += "  valve";
+        else if (network.hasPipe (v)) firstLine += "  pipe";
+        else firstLine += "  empty";
+
+        g.drawFittedText (firstLine, area.removeFromTop (20.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+
+        if (const auto* valve = selectedValve())
+        {
+            g.setColour (PipeLookAndFeel::pink.brighter (0.16f));
+            g.drawFittedText ("Note " + noteName (valve->midiNote),
+                              area.removeFromTop (20.0f).toNearestInt(),
+                              juce::Justification::centredLeft,
+                              1);
+        }
     }
 
     void drawPreviewMarkers (juce::Graphics& g, juce::Rectangle<float> area)
@@ -2107,7 +2445,7 @@ private:
 
         for (const auto valve : network.valves)
         {
-            const auto point = isoPoint ({ (float) valve.x, (float) valve.y, (float) valve.z }, area);
+            const auto point = isoPoint ({ (float) valve.position.x, (float) valve.position.y, (float) valve.position.z }, area);
             g.setColour (PipeLookAndFeel::pink.withAlpha (0.24f));
             g.fillRoundedRectangle ({ point.x - 7.0f, point.y - 7.0f, 14.0f, 14.0f }, 3.0f);
             g.setColour (PipeLookAndFeel::pink);
@@ -2178,13 +2516,17 @@ private:
         else if (button == &eraseButton) setTool (Tool::erase);
         else if (button == &playButton)  setPlaying (! playing);
         else if (button == &stopButton)  setPlaying (false);
+        else if (button == &noteDownButton) adjustSelectedValveNote (-1);
+        else if (button == &noteUpButton)   adjustSelectedValveNote (1);
         else if (button == &demoButton)
         {
             setPlaying (false);
             network.loadDemo();
             setSelectedFace (0);
             selectedDepth = 0;
+            selectedCell.reset();
             layerSlider.setValue (1.0, juce::dontSendNotification);
+            updateInspectorControls();
             setStatus ("Demo loaded");
             repaint();
         }
@@ -2192,6 +2534,8 @@ private:
         {
             setPlaying (false);
             network.clear();
+            selectedCell.reset();
+            updateInspectorControls();
             setStatus ("Cleared");
             repaint();
         }
@@ -2214,6 +2558,7 @@ private:
         {
             selectedDepth = juce::jlimit (0, gridSize - 1, (int) std::round (layerSlider.getValue()) - 1);
             layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
+            updateInspectorControls();
             repaint();
         }
         else if (slider == &tempoSlider)
