@@ -20,16 +20,16 @@ build/pipe_artefacts/Debug/pipe.app
 ## Play
 
 - Use `SELECT` to inspect cells without changing the pipework.
-- Drag with `PIPE` selected to draw pipe routes on the current 2D layer.
+- Drag with `PIPE` selected to preview pipe routes on the current 2D layer, then release to commit the pipe.
 - Switch faces and layers to build into the 3D volume.
 - Place `TAP` markers as water sources.
 - Place `VALVE` markers as sounding points.
 - Place `DRAIN` markers to let droplets fall out of the pipework. Falling droplets drop twice as fast, disappear at the cube floor, and rejoin if they hit pipework below.
-- Click a cell to inspect it. If it contains a valve, use `NOTE -` and `NOTE +` to tune that valve.
+- Click a cell to inspect it. If it contains a valve, use `NOTE -`, `NOTE +`, or the pitch slider to tune that valve.
 - Press `PLAY` to animate the water and hear valves.
 - While playing, click an existing tap to turn it on or off without deleting it.
 - While playing, click an existing drain to open or close it without deleting it.
 - Use the File menu to save or load patches as JSON.
 - `DEMO` reloads the starter patch; `CLEAR` empties the grid.
 
-Keyboard shortcuts: `1` select, `2` pipe, `3` tap, `4` valve, `5` drain, `E` erase, backspace/delete removes the selected cell in select mode, space play/stop, `[` and `]` change layer.
+Keyboard shortcuts: `1` select, `2` pipe, `3` tap, `4` valve, `5` drain, `E` erase, command-Z undo, command-shift-Z redo, backspace/delete removes the selected cell in select mode, space play/stop, `[` and `]` change layer.

@@ -770,6 +770,7 @@ public:
 
         setupSlider (layerSlider, 1.0, (double) gridSize, 1.0, 1.0);
         setupSlider (tempoSlider, 40.0, 220.0, 1.0, 120.0);
+        setupSlider (noteSlider, 24.0, 96.0, 1.0, 60.0);
 
         setupButton (selectButton, "SELECT", "Inspect cells without changing the pipework");
         setupButton (pipeButton, "PIPE", "Draw connected pipe paths");
@@ -783,8 +784,10 @@ public:
         setupButton (clearButton, "CLEAR", "Clear every pipe, tap, valve and drain");
         setupButton (noteDownButton, "NOTE -", "Lower the selected valve note");
         setupButton (noteUpButton, "NOTE +", "Raise the selected valve note");
+        noteSlider.setTooltip ("Tune the selected valve");
         noteDownButton.setVisible (false);
         noteUpButton.setVisible (false);
+        noteSlider.setVisible (false);
 
         network.loadDemo();
         updateButtonStates();
@@ -986,6 +989,11 @@ public:
         noteDownButton.setBounds (noteArea.removeFromLeft (noteW));
         noteArea.removeFromLeft (noteGap);
         noteUpButton.setBounds (noteArea);
+
+        auto pitchArea = noteArea.withX ((int) card.getX()).withY (noteUpButton.getBottom() + 8).withWidth ((int) card.getWidth()).withHeight (42);
+        noteSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+        noteSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 24);
+        noteSlider.setBounds (pitchArea);
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -1031,9 +1039,12 @@ public:
         if (selectedTool == Tool::pipe)
         {
             drawingPipe = true;
+            pipeStartCell = *cell;
             lastPipeCell = *cell;
+            previewPipeCells = { *cell };
             drewPipeSegment = false;
-            setStatus ("Drag pipe");
+            setStatus ("Preview pipe");
+            repaint();
             return;
         }
 
@@ -1048,9 +1059,9 @@ public:
 
         hoverCell = *cell;
 
-        if (drawingPipe && lastPipeCell.has_value())
+        if (drawingPipe && pipeStartCell.has_value())
         {
-            routePipe (*lastPipeCell, *cell);
+            previewPipeCells = pipePath (*pipeStartCell, *cell);
             lastPipeCell = *cell;
         }
 
@@ -1072,10 +1083,21 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         if (drawingPipe)
+        {
+            if (previewPipeCells.size() > 1)
+            {
+                beginChange();
+                for (size_t i = 1; i < previewPipeCells.size(); ++i)
+                    connectCells (previewPipeCells[i - 1], previewPipeCells[i]);
+            }
+
             setStatus (drewPipeSegment ? "Pipe changed" : "Drag across cells to create a pipe");
+        }
 
         drawingPipe = false;
+        pipeStartCell.reset();
         lastPipeCell.reset();
+        previewPipeCells.clear();
         repaint();
     }
 
@@ -1095,6 +1117,13 @@ public:
             setPlaying (! playing);
             return true;
         }
+
+        if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))
+            return undo();
+
+        if (key == juce::KeyPress ('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)
+            || key == juce::KeyPress ('y', juce::ModifierKeys::commandModifier, 0))
+            return redo();
 
         if (key == juce::KeyPress::backspaceKey || key == juce::KeyPress::deleteKey)
             return deleteSelectedCell();
@@ -1139,6 +1168,7 @@ private:
     std::array<juce::TextButton, 6> faceButtons;
     juce::Slider layerSlider;
     juce::Slider tempoSlider;
+    juce::Slider noteSlider;
     juce::TextButton selectButton;
     juce::TextButton pipeButton;
     juce::TextButton tapButton;
@@ -1157,14 +1187,17 @@ private:
     int selectedDepth = 0;
     bool drawingPipe = false;
     bool drewPipeSegment = false;
+    std::optional<Cell> pipeStartCell;
     std::optional<Cell> lastPipeCell;
     std::optional<Cell> hoverCell;
     std::optional<Cell> selectedCell;
+    std::vector<Cell> previewPipeCells;
 
     bool playing = false;
     double bpm = 120.0;
     double emitAccumulator = 0.0;
     double lastTimerMs = 0.0;
+    double animationPhase = 0.0;
     IVec3 gravityVector { 0, -1, 0 };
     std::vector<Flow> flows;
 
@@ -1176,6 +1209,9 @@ private:
     juce::String status = "Ready";
     bool large3DView = false;
     std::unique_ptr<juce::FileChooser> fileChooser;
+    std::vector<PipeNetwork> undoStack;
+    std::vector<PipeNetwork> redoStack;
+    bool updatingNoteSlider = false;
 
     static constexpr int savePatchMenuId = 9001;
     static constexpr int loadPatchMenuId = 9002;
@@ -1286,6 +1322,7 @@ private:
             }
         }
 
+        beginChange();
         network = std::move (loaded);
         selectedDepth = juce::jlimit (0, gridSize - 1, (int) patch.getProperty ("layer", selectedDepth));
         selectedCell.reset();
@@ -1352,6 +1389,45 @@ private:
         slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 46, 24);
         slider.addListener (this);
         addAndMakeVisible (slider);
+    }
+
+    void beginChange()
+    {
+        undoStack.push_back (network);
+        if (undoStack.size() > 80)
+            undoStack.erase (undoStack.begin());
+
+        redoStack.clear();
+    }
+
+    bool undo()
+    {
+        if (undoStack.empty())
+            return false;
+
+        redoStack.push_back (network);
+        network = undoStack.back();
+        undoStack.pop_back();
+        flows.clear();
+        updateInspectorControls();
+        setStatus ("Undo");
+        repaint();
+        return true;
+    }
+
+    bool redo()
+    {
+        if (redoStack.empty())
+            return false;
+
+        undoStack.push_back (network);
+        network = redoStack.back();
+        redoStack.pop_back();
+        flows.clear();
+        updateInspectorControls();
+        setStatus ("Redo");
+        repaint();
+        return true;
     }
 
     Layout getLayout() const
@@ -1476,13 +1552,35 @@ private:
         const auto hasValve = selectedValve() != nullptr;
         noteDownButton.setVisible (hasValve);
         noteUpButton.setVisible (hasValve);
+        noteSlider.setVisible (hasValve);
+
+        updatingNoteSlider = true;
+        if (const auto* valve = selectedValve())
+            noteSlider.setValue (valve->midiNote, juce::dontSendNotification);
+        updatingNoteSlider = false;
     }
 
     void adjustSelectedValveNote (int semitones)
     {
         if (auto* valve = selectedValve())
         {
+            beginChange();
             valve->midiNote = juce::jlimit (24, 96, valve->midiNote + semitones);
+            updateInspectorControls();
+            setStatus ("Valve note " + noteName (valve->midiNote));
+            repaint();
+        }
+    }
+
+    void setSelectedValveNote (int midiNote)
+    {
+        if (updatingNoteSlider)
+            return;
+
+        if (auto* valve = selectedValve())
+        {
+            beginChange();
+            valve->midiNote = juce::jlimit (24, 96, midiNote);
             setStatus ("Valve note " + noteName (valve->midiNote));
             repaint();
         }
@@ -1493,6 +1591,7 @@ private:
         if (selectedTool != Tool::select || ! selectedCell.has_value())
             return false;
 
+        beginChange();
         network.eraseVoxel (cellToVoxel (selectedFace, selectedDepth, *selectedCell));
         updateInspectorControls();
         setStatus ("Selection deleted");
@@ -1518,21 +1617,25 @@ private:
 
         if (selectedTool == Tool::tap)
         {
+            beginChange();
             network.toggleTap (voxel);
             setStatus (network.hasTap (voxel) ? "Tap added" : "Tap removed");
         }
         else if (selectedTool == Tool::valve)
         {
+            beginChange();
             network.toggleValve (voxel);
             setStatus (network.hasValve (voxel) ? "Valve added" : "Valve removed");
         }
         else if (selectedTool == Tool::drain)
         {
+            beginChange();
             network.toggleDrain (voxel);
             setStatus (network.hasDrain (voxel) ? "Drain added" : "Drain removed");
         }
         else if (selectedTool == Tool::erase)
         {
+            beginChange();
             network.eraseVoxel (voxel);
             setStatus ("Cell erased");
         }
@@ -1541,10 +1644,12 @@ private:
         repaint();
     }
 
-    void routePipe (Cell from, Cell to)
+    std::vector<Cell> pipePath (Cell from, Cell to) const
     {
+        std::vector<Cell> path { from };
+
         if (from == to)
-            return;
+            return path;
 
         auto cursor = from;
         const auto horizontalFirst = std::abs (to.col - from.col) >= std::abs (to.row - from.row);
@@ -1555,8 +1660,8 @@ private:
             {
                 auto next = cursor;
                 next.col += signOf (to.col - cursor.col);
-                connectCells (cursor, next);
                 cursor = next;
+                path.push_back (cursor);
             }
         };
 
@@ -1566,8 +1671,8 @@ private:
             {
                 auto next = cursor;
                 next.row += signOf (to.row - cursor.row);
-                connectCells (cursor, next);
                 cursor = next;
+                path.push_back (cursor);
             }
         };
 
@@ -1581,6 +1686,8 @@ private:
             stepVertical();
             stepHorizontal();
         }
+
+        return path;
     }
 
     void connectCells (Cell a, Cell b)
@@ -1624,7 +1731,10 @@ private:
         lastTimerMs = now;
 
         if (playing)
+        {
+            animationPhase += dt;
             updateFlow (dt);
+        }
 
         updateButtonStates();
         repaint();
@@ -1918,6 +2028,7 @@ private:
             for (int col = 0; col < gridSize; ++col)
                 drawCellContents (g, Cell { col, row }, selectedDepth, grid, cell, 1.0f);
 
+        drawPipePreview (g, grid, cell);
         drawMarkers2D (g, grid, cell);
         drawFlows2D (g, grid, cell);
 
@@ -2102,8 +2213,34 @@ private:
         g.fillEllipse ({ centre.x - pipeWidth * 0.55f, centre.y - pipeWidth * 0.55f, pipeWidth * 1.1f, pipeWidth * 1.1f });
     }
 
+    void drawPipePreview (juce::Graphics& g, juce::Rectangle<float> grid, float cell)
+    {
+        if (previewPipeCells.size() < 2)
+            return;
+
+        const auto width = juce::jmax (3.0f, cell * 0.11f);
+        g.setColour (PipeLookAndFeel::lemon.withAlpha (0.34f));
+
+        for (size_t i = 1; i < previewPipeCells.size(); ++i)
+        {
+            const auto a = cellCentre (grid, cell, previewPipeCells[i - 1]);
+            const auto b = cellCentre (grid, cell, previewPipeCells[i]);
+            g.drawDashedLine ({ a, b }, std::array<float, 2> { 7.0f, 5.0f }.data(), 2, width);
+        }
+
+        g.setColour (PipeLookAndFeel::lemon.withAlpha (0.70f));
+        for (const auto previewCell : previewPipeCells)
+        {
+            const auto centre = cellCentre (grid, cell, previewCell);
+            const auto r = cell * 0.10f;
+            g.fillEllipse ({ centre.x - r, centre.y - r, r * 2.0f, r * 2.0f });
+        }
+    }
+
     void drawMarkers2D (juce::Graphics& g, juce::Rectangle<float> grid, float cell)
     {
+        const auto pulse = playing ? 0.5f + 0.5f * std::sin ((float) animationPhase * 7.0f) : 0.0f;
+
         for (const auto tap : network.taps)
         {
             if (const auto display = voxelToCellOnFaceDepth (selectedFace, selectedDepth, tap))
@@ -2115,6 +2252,14 @@ private:
 
                 g.setColour (tapColour.withAlpha (enabled ? 0.18f : 0.10f));
                 g.fillEllipse ({ centre.x - radius * 1.7f, centre.y - radius * 1.7f, radius * 3.4f, radius * 3.4f });
+
+                if (playing && enabled)
+                {
+                    const auto pulseRadius = radius * (1.85f + pulse * 0.95f);
+                    g.setColour (tapColour.withAlpha (0.18f * (1.0f - pulse)));
+                    g.drawEllipse ({ centre.x - pulseRadius, centre.y - pulseRadius, pulseRadius * 2.0f, pulseRadius * 2.0f }, 2.0f);
+                }
+
                 g.setColour (tapColour.withAlpha (enabled ? 1.0f : 0.62f));
                 g.drawEllipse ({ centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f }, 2.0f);
                 g.drawLine (centre.x, centre.y - radius * 1.25f, centre.x, centre.y + radius * 1.25f, 1.8f);
@@ -2152,6 +2297,13 @@ private:
 
                 g.setColour (drainColour.withAlpha (open ? 0.16f : 0.10f));
                 g.fillEllipse ({ centre.x - radius * 1.45f, centre.y - radius * 1.45f, radius * 2.9f, radius * 2.9f });
+                if (playing && open)
+                {
+                    g.setColour (drainColour.withAlpha (0.14f + pulse * 0.16f));
+                    g.drawLine (centre.x, centre.y + radius * 1.0f,
+                                centre.x, centre.y + radius * (1.8f + pulse * 0.8f),
+                                2.0f);
+                }
                 g.setColour (drainColour.withAlpha (open ? 1.0f : 0.62f));
                 g.drawEllipse ({ centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f }, 2.0f);
 
@@ -2459,6 +2611,8 @@ private:
 
     void drawPreviewMarkers (juce::Graphics& g, juce::Rectangle<float> area)
     {
+        const auto pulse = playing ? 0.5f + 0.5f * std::sin ((float) animationPhase * 7.0f) : 0.0f;
+
         for (const auto tap : network.taps)
         {
             const auto point = isoPoint ({ (float) tap.x, (float) tap.y, (float) tap.z }, area);
@@ -2467,6 +2621,12 @@ private:
 
             g.setColour (tapColour.withAlpha (enabled ? 0.20f : 0.08f));
             g.fillEllipse ({ point.x - 8.0f, point.y - 8.0f, 16.0f, 16.0f });
+            if (playing && enabled)
+            {
+                const auto r = 8.0f + pulse * 5.0f;
+                g.setColour (tapColour.withAlpha (0.18f * (1.0f - pulse)));
+                g.drawEllipse ({ point.x - r, point.y - r, r * 2.0f, r * 2.0f }, 1.4f);
+            }
             g.setColour (tapColour.withAlpha (enabled ? 1.0f : 0.58f));
             g.drawEllipse ({ point.x - 5.5f, point.y - 5.5f, 11.0f, 11.0f }, 2.0f);
 
@@ -2491,6 +2651,11 @@ private:
 
             g.setColour (drainColour.withAlpha (open ? 0.18f : 0.08f));
             g.fillEllipse ({ point.x - 7.0f, point.y - 7.0f, 14.0f, 14.0f });
+            if (playing && open)
+            {
+                g.setColour (drainColour.withAlpha (0.18f + pulse * 0.16f));
+                g.drawLine (point.x, point.y + 6.0f, point.x, point.y + 11.0f + pulse * 5.0f, 1.6f);
+            }
             g.setColour (drainColour.withAlpha (open ? 1.0f : 0.58f));
             juce::Path funnel;
             funnel.startNewSubPath (point.x - 5.5f, point.y - 3.0f);
@@ -2553,6 +2718,7 @@ private:
         else if (button == &demoButton)
         {
             setPlaying (false);
+            beginChange();
             network.loadDemo();
             setSelectedFace (0);
             selectedDepth = 0;
@@ -2565,6 +2731,7 @@ private:
         else if (button == &clearButton)
         {
             setPlaying (false);
+            beginChange();
             network.clear();
             selectedCell.reset();
             updateInspectorControls();
@@ -2597,6 +2764,10 @@ private:
         {
             bpm = tempoSlider.getValue();
             setStatus ("Tempo " + juce::String ((int) std::round (bpm)) + " BPM");
+        }
+        else if (slider == &noteSlider)
+        {
+            setSelectedValveNote ((int) std::round (noteSlider.getValue()));
         }
     }
 
