@@ -1598,8 +1598,7 @@ private:
         g.setColour (juce::Colour (0xff17172b));
         g.fillRoundedRectangle (grid, 12.0f);
 
-        drawLayerGhost (g, selectedDepth - 1, grid, cell, true);
-        drawLayerGhost (g, selectedDepth + 1, grid, cell, false);
+        drawLayerGhosts (g, grid, cell);
 
         for (int row = 0; row < gridSize; ++row)
             for (int col = 0; col < gridSize; ++col)
@@ -1661,14 +1660,69 @@ private:
                  grid.getY() + ((float) displayCell.row + 0.5f) * cell };
     }
 
-    void drawLayerGhost (juce::Graphics& g, int depth, juce::Rectangle<float> grid, float cell, bool towardViewer)
+    void drawLayerGhosts (juce::Graphics& g, juce::Rectangle<float> grid, float cell)
     {
-        if (depth < 0 || depth >= gridSize)
-            return;
+        for (int distance = gridSize - 1; distance >= 1; --distance)
+        {
+            const auto behindDepth = selectedDepth + distance;
+            const auto aheadDepth = selectedDepth - distance;
+
+            if (behindDepth < gridSize)
+                drawLayerGhost (g, behindDepth, grid, cell, distance, false);
+
+            if (aheadDepth >= 0)
+                drawLayerGhost (g, aheadDepth, grid, cell, distance, true);
+        }
+    }
+
+    void drawLayerGhost (juce::Graphics& g, int depth, juce::Rectangle<float> grid, float cell, int distance, bool towardViewer)
+    {
+        const auto alpha = juce::jlimit (0.045f, 0.32f, 0.34f / ((float) distance + 0.45f));
 
         for (int row = 0; row < gridSize; ++row)
             for (int col = 0; col < gridSize; ++col)
-                drawCellContents (g, Cell { col, row }, depth, grid, cell, towardViewer ? 0.20f : 0.12f);
+                drawGhostCellContents (g, Cell { col, row }, depth, grid, cell, alpha, towardViewer);
+    }
+
+    void drawGhostCellContents (juce::Graphics& g,
+                                Cell displayCell,
+                                int depth,
+                                juce::Rectangle<float> grid,
+                                float cell,
+                                float alpha,
+                                bool towardViewer)
+    {
+        const auto voxel = cellToVoxel (selectedFace, depth, displayCell);
+        const auto mask = network.pipes[(size_t) indexOf (voxel)];
+
+        if (mask == 0)
+            return;
+
+        const auto offsetAmount = juce::jlimit (1.2f, 5.0f, cell * (towardViewer ? -0.055f : 0.055f));
+        const auto centre = cellCentre (grid, cell, displayCell) + juce::Point<float> (offsetAmount, offsetAmount);
+        const auto pipeWidth = juce::jmax (1.4f, cell * 0.055f);
+        const auto ghostColour = (towardViewer ? PipeLookAndFeel::aqua : PipeLookAndFeel::lavender).withAlpha (alpha);
+
+        g.setColour (ghostColour);
+
+        for (const auto& direction : directions)
+        {
+            if ((mask & direction.bit) == 0)
+                continue;
+
+            if (auto displayDirection = displayDirectionForBit (selectedFace, direction.bit))
+            {
+                const auto end = centre + (*displayDirection) * (cell * 0.43f);
+                g.drawDashedLine ({ centre, end }, std::array<float, 2> { 4.0f, 4.0f }.data(), 2, pipeWidth);
+            }
+            else
+            {
+                const auto r = cell * 0.105f;
+                g.drawEllipse ({ centre.x - r, centre.y - r, r * 2.0f, r * 2.0f }, pipeWidth);
+            }
+        }
+
+        g.fillEllipse ({ centre.x - pipeWidth * 0.7f, centre.y - pipeWidth * 0.7f, pipeWidth * 1.4f, pipeWidth * 1.4f });
     }
 
     void drawCellContents (juce::Graphics& g, Cell displayCell, int depth, juce::Rectangle<float> grid, float cell, float alpha)
