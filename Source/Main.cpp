@@ -632,13 +632,13 @@ public:
         taps = { { 1, 9, 11 }, { 10, 3, 11 }, { 2, 9, 5 } };
         disabledTaps.clear();
         valves = {
-            { { 4, 9, 11 }, defaultValveNoteFor ({ 4, 9, 11 }) },
-            { { 8, 9, 11 }, defaultValveNoteFor ({ 8, 9, 11 }) },
-            { { 10, 6, 11 }, defaultValveNoteFor ({ 10, 6, 11 }) },
-            { { 6, 3, 11 }, defaultValveNoteFor ({ 6, 3, 11 }) },
-            { { 6, 9, 8 }, defaultValveNoteFor ({ 6, 9, 8 }) },
-            { { 9, 7, 5 }, defaultValveNoteFor ({ 9, 7, 5 }) },
-            { { 8, 7, 8 }, defaultValveNoteFor ({ 8, 7, 8 }) }
+            { { 4, 9, 11 }, 60 },
+            { { 8, 9, 11 }, 62 },
+            { { 10, 6, 11 }, 64 },
+            { { 6, 3, 11 }, 67 },
+            { { 6, 9, 8 }, 69 },
+            { { 9, 7, 5 }, 72 },
+            { { 8, 7, 8 }, 74 }
         };
         drains = { { 10, 9, 11 }, { 6, 9, 5 } };
         closedDrains.clear();
