@@ -886,14 +886,15 @@ public:
                 addTickedMenuItem (menu, mainViewMenuId, "Main View", scViewMode == ScViewMode::balanced);
                 addTickedMenuItem (menu, large3DViewMenuId, "Large 3D View", scViewMode == ScViewMode::large3D);
                 addTickedMenuItem (menu, largeCodeViewMenuId, "Large Code View", scViewMode == ScViewMode::largeCode);
-                menu.addSeparator();
-                menu.addItem (openCodeWindowMenuId, "Open Code Window");
             }
             else
             {
                 addTickedMenuItem (menu, mainViewMenuId, "Main View", ! large3DView);
                 addTickedMenuItem (menu, large3DViewMenuId, "Large 3D View", large3DView);
             }
+
+            menu.addSeparator();
+            menu.addItem (openCodeWindowMenuId, "Open Code Window");
         }
 
         return menu;
@@ -1829,6 +1830,7 @@ private:
             large3DView = false;
 
         setStatus ("Main view");
+        menuItemsChanged();
         resized();
         repaint();
     }
@@ -1841,6 +1843,7 @@ private:
             large3DView = true;
 
         setStatus ("Large 3D view");
+        menuItemsChanged();
         resized();
         repaint();
     }
@@ -1849,12 +1852,16 @@ private:
     {
         scViewMode = ScViewMode::largeCode;
         setStatus ("Large code view");
+        menuItemsChanged();
         resized();
         repaint();
     }
 
     void openLargeCodeWindow()
     {
+        if (soundMode != SoundMode::superCollider)
+            setSoundMode (SoundMode::superCollider);
+
         if (largeCodeWindow == nullptr)
             largeCodeWindow = std::make_unique<LargeCodeWindow> (*this);
         else
@@ -2084,6 +2091,7 @@ private:
         }
 
         updateSoundModeControls();
+        menuItemsChanged();
     }
 
     const std::vector<int>& currentScale() const
