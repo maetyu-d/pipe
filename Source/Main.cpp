@@ -724,7 +724,6 @@ public:
         if (text == "ERASE") return lavender;
         if (text == "PLAY")  return mint;
         if (text == "STOP")  return coral;
-        if (text == "DEMO")  return sky;
         if (text == "CLEAR") return lavender;
         if (text == "Front") return lemon;
         if (text == "Right") return aqua;
@@ -829,7 +828,6 @@ public:
         setupButton (eraseButton, "ERASE", "Erase a pipe cell and its markers");
         setupButton (playButton, "PLAY", "Start water flow");
         setupButton (stopButton, "STOP", "Stop water flow");
-        setupButton (demoButton, "DEMO", "Reload the starter patch");
         setupButton (clearButton, "CLEAR", "Clear every pipe, tap, valve and drain");
         setupButton (noteDownButton, "NOTE -", "Lower the selected valve note");
         setupButton (noteUpButton, "NOTE +", "Raise the selected valve note");
@@ -873,6 +871,8 @@ public:
         {
             menu.addItem (savePatchMenuId, "Save Patch...");
             menu.addItem (loadPatchMenuId, "Load Patch...");
+            menu.addSeparator();
+            menu.addItem (loadDemoMenuId, "Load Demo");
         }
         else if (menuName == "Mode")
         {
@@ -905,6 +905,8 @@ public:
             savePatchAs();
         else if (menuItemID == loadPatchMenuId)
             loadPatch();
+        else if (menuItemID == loadDemoMenuId)
+            loadDemoPatch();
         else if (menuItemID == internalSoundModeMenuId)
             setSoundMode (SoundMode::internal);
         else if (menuItemID == superColliderSoundModeMenuId)
@@ -1044,8 +1046,6 @@ public:
         playButton.setBounds (top.removeFromLeft (72));
         top.removeFromLeft (6);
         stopButton.setBounds (top.removeFromLeft (72));
-        top.removeFromLeft (6);
-        demoButton.setBounds (top.removeFromLeft (72));
         top.removeFromLeft (6);
         clearButton.setBounds (top.removeFromLeft (78));
 
@@ -1425,7 +1425,6 @@ private:
     juce::TextButton eraseButton;
     juce::TextButton playButton;
     juce::TextButton stopButton;
-    juce::TextButton demoButton;
     juce::TextButton clearButton;
     juce::TextButton noteDownButton;
     juce::TextButton noteUpButton;
@@ -1479,6 +1478,7 @@ private:
 
     static constexpr int savePatchMenuId = 9001;
     static constexpr int loadPatchMenuId = 9002;
+    static constexpr int loadDemoMenuId = 9003;
     static constexpr int internalSoundModeMenuId = 9501;
     static constexpr int superColliderSoundModeMenuId = 9502;
     static constexpr int mainViewMenuId = 1001;
@@ -1653,6 +1653,20 @@ private:
                                       if (! loadPatchFromVar (parsed))
                                           setStatus ("Could not load patch");
                                   });
+    }
+
+    void loadDemoPatch()
+    {
+        setPlaying (false);
+        beginChange();
+        network.loadDemo();
+        setSelectedFace (0);
+        selectedDepth = 0;
+        selectedCell.reset();
+        layerSlider.setValue (1.0, juce::dontSendNotification);
+        updateInspectorControls();
+        setStatus ("Demo loaded");
+        repaint();
     }
 
     juce::String getScProgramText() const
@@ -3380,19 +3394,6 @@ private:
         else if (button == &resetScButton) resetScProgram();
         else if (button == &loadScButton) loadScProgram();
         else if (button == &saveScButton) saveScProgram();
-        else if (button == &demoButton)
-        {
-            setPlaying (false);
-            beginChange();
-            network.loadDemo();
-            setSelectedFace (0);
-            selectedDepth = 0;
-            selectedCell.reset();
-            layerSlider.setValue (1.0, juce::dontSendNotification);
-            updateInspectorControls();
-            setStatus ("Demo loaded");
-            repaint();
-        }
         else if (button == &clearButton)
         {
             setPlaying (false);
