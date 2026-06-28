@@ -803,15 +803,16 @@ public:
 
         scCodeDocument.replaceAllContent (defaultScProgram());
         scCodeEditor = std::make_unique<juce::CodeEditorComponent> (scCodeDocument, &scTokeniser);
-        scCodeEditor->setFont (juce::FontOptions (12.0f));
+        scCodeEditor->setFont (juce::FontOptions (14.0f));
         scCodeEditor->setTabSize (4, true);
         scCodeEditor->setLineNumbersShown (true);
         scCodeEditor->setScrollbarThickness (10);
-        scCodeEditor->setColour (juce::CodeEditorComponent::backgroundColourId, PipeLookAndFeel::panel2.withAlpha (0.78f));
+        scCodeEditor->setColour (juce::CodeEditorComponent::backgroundColourId, juce::Colour (0xff101525));
         scCodeEditor->setColour (juce::CodeEditorComponent::defaultTextColourId, PipeLookAndFeel::ink);
         scCodeEditor->setColour (juce::CodeEditorComponent::lineNumberTextId, PipeLookAndFeel::muted.withAlpha (0.72f));
-        scCodeEditor->setColour (juce::CodeEditorComponent::lineNumberBackgroundId, PipeLookAndFeel::panel.withAlpha (0.78f));
+        scCodeEditor->setColour (juce::CodeEditorComponent::lineNumberBackgroundId, juce::Colour (0xff15182c));
         scCodeEditor->setColour (juce::CodeEditorComponent::highlightColourId, PipeLookAndFeel::pink.withAlpha (0.28f));
+        scCodeEditor->setColourScheme (makeScEditorColourScheme());
         scCodeEditor->setVisible (false);
         addAndMakeVisible (*scCodeEditor);
 
@@ -1783,6 +1784,23 @@ private:
     sig = (sig + shimmer + (SinOsc.ar(freq * 2.01) * falling * 0.18)) * env * amp * (0.75 + height * 0.5);
     Out.ar(out, Pan2.ar(sig.tanh, pan));
 )SC";
+    }
+
+    static juce::CodeEditorComponent::ColourScheme makeScEditorColourScheme()
+    {
+        juce::CodeEditorComponent::ColourScheme scheme;
+        scheme.set ("Error", juce::Colour (0xffff6b8a));
+        scheme.set ("Comment", juce::Colour (0xff8ca0bd));
+        scheme.set ("Keyword", juce::Colour (0xff8ef6a3));
+        scheme.set ("Operator", juce::Colour (0xffffdd6d));
+        scheme.set ("Identifier", juce::Colour (0xfffff9f0));
+        scheme.set ("Integer", juce::Colour (0xffff9d72));
+        scheme.set ("Float", juce::Colour (0xffffb86c));
+        scheme.set ("String", juce::Colour (0xffd58cff));
+        scheme.set ("Bracket", juce::Colour (0xff58d8ff));
+        scheme.set ("Punctuation", juce::Colour (0xffc8d3f5));
+        scheme.set ("Preprocessor Text", juce::Colour (0xffff7aa8));
+        return scheme;
     }
 
     static juce::String wrappedScProgram (const juce::String& synthName, juce::String program)
@@ -2993,10 +3011,10 @@ private:
                                                   editorBounds.getY() - 44.0f,
                                                   editorBounds.getWidth() + 20.0f,
                                                   editorBounds.getHeight() + 54.0f);
-        g.setColour (PipeLookAndFeel::panel2.withAlpha (0.46f));
+        g.setColour (juce::Colour (0xff171b31));
         g.fillRoundedRectangle (pane, 14.0f);
-        g.setColour (PipeLookAndFeel::line.withAlpha (0.42f));
-        g.drawRoundedRectangle (pane, 14.0f, 1.0f);
+        g.setColour (PipeLookAndFeel::aqua.withAlpha (0.34f));
+        g.drawRoundedRectangle (pane, 14.0f, 1.2f);
 
         auto header = pane.withHeight (34.0f).reduced (10.0f, 0.0f);
         g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
