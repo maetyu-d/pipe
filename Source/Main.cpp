@@ -1556,7 +1556,7 @@ private:
         g.drawFittedText ("pipe", title.removeFromTop (24), juce::Justification::centredLeft, 1);
         g.setColour (PipeLookAndFeel::pink);
         g.setFont (juce::FontOptions (10.0f).withStyle ("Bold"));
-        g.drawFittedText ("12^3 rainbow pipes", title, juce::Justification::centredLeft, 1);
+        g.drawFittedText ("matd.space", title, juce::Justification::centredLeft, 1);
 
         g.setFont (juce::FontOptions (9.0f));
         g.setColour (PipeLookAndFeel::muted.withAlpha (0.80f));
