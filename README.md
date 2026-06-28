@@ -29,6 +29,7 @@ build/pipe_artefacts/Debug/pipe.app
 - Use the key and scale controls to keep valve notes in a shared musical mode.
 - Use the Mode menu to switch from `JUCE Sound` to `SuperCollider Sound` and route valve hits through the embedded SuperCollider engine from `unfolding`.
 - In `SuperCollider Sound`, the View menu includes `Large 3D View` and `Large Code View`.
+- Use `View > Open Code Window` to pop the SuperCollider editor into its own large resizable window.
 - In `SC` mode, edit the SuperCollider code panel and press `APPLY SC`. The editor has line numbers plus reset/load/save controls. Snippets are wrapped as a SynthDef and receive `pitch`, `amp`, `sustain`, `pan`, `brightness`, `water`, `height`, `falling`, `exits`, and `tempo`.
 - Press `PLAY` to animate the water and hear valves.
 - Water now shapes the sound: valve notes pan by position, brighten with height and movement, and hit harder when water falls from a drain.

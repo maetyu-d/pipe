@@ -810,16 +810,7 @@ public:
 
         scCodeDocument.replaceAllContent (defaultScProgram());
         scCodeEditor = std::make_unique<juce::CodeEditorComponent> (scCodeDocument, &scTokeniser);
-        scCodeEditor->setFont (juce::FontOptions (14.0f));
-        scCodeEditor->setTabSize (4, true);
-        scCodeEditor->setLineNumbersShown (true);
-        scCodeEditor->setScrollbarThickness (10);
-        scCodeEditor->setColour (juce::CodeEditorComponent::backgroundColourId, juce::Colour (0xff101525));
-        scCodeEditor->setColour (juce::CodeEditorComponent::defaultTextColourId, PipeLookAndFeel::ink);
-        scCodeEditor->setColour (juce::CodeEditorComponent::lineNumberTextId, PipeLookAndFeel::muted.withAlpha (0.72f));
-        scCodeEditor->setColour (juce::CodeEditorComponent::lineNumberBackgroundId, juce::Colour (0xff15182c));
-        scCodeEditor->setColour (juce::CodeEditorComponent::highlightColourId, PipeLookAndFeel::pink.withAlpha (0.28f));
-        scCodeEditor->setColourScheme (makeScEditorColourScheme());
+        configureScCodeEditor (*scCodeEditor);
         scCodeEditor->setVisible (false);
         addAndMakeVisible (*scCodeEditor);
 
@@ -895,6 +886,8 @@ public:
                 addTickedMenuItem (menu, mainViewMenuId, "Main View", scViewMode == ScViewMode::balanced);
                 addTickedMenuItem (menu, large3DViewMenuId, "Large 3D View", scViewMode == ScViewMode::large3D);
                 addTickedMenuItem (menu, largeCodeViewMenuId, "Large Code View", scViewMode == ScViewMode::largeCode);
+                menu.addSeparator();
+                menu.addItem (openCodeWindowMenuId, "Open Code Window");
             }
             else
             {
@@ -922,6 +915,8 @@ public:
             setLarge3DView();
         else if (menuItemID == largeCodeViewMenuId)
             setLargeCodeView();
+        else if (menuItemID == openCodeWindowMenuId)
+            openLargeCodeWindow();
     }
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
@@ -1317,6 +1312,92 @@ private:
         juce::Rectangle<int> footer;
     };
 
+    class LargeCodeWindow final : public juce::DocumentWindow,
+                                  private juce::Button::Listener
+    {
+    public:
+        explicit LargeCodeWindow (MainComponent& ownerToUse)
+            : DocumentWindow ("SC Code",
+                              PipeLookAndFeel::bg,
+                              DocumentWindow::allButtons),
+              owner (ownerToUse),
+              editor (owner.scCodeDocument, &owner.scTokeniser)
+        {
+            setUsingNativeTitleBar (true);
+            setResizable (true, true);
+
+            content.addAndMakeVisible (editor);
+            owner.configureScCodeEditor (editor);
+
+            setupButton (applyButton, "APPLY SC");
+            setupButton (resetButton, "RESET");
+            setupButton (loadButton, "LOAD");
+            setupButton (saveButton, "SAVE");
+
+            setContentNonOwned (&content, false);
+            centreWithSize (860, 640);
+            setVisible (true);
+        }
+
+        ~LargeCodeWindow() override
+        {
+            applyButton.removeListener (this);
+            resetButton.removeListener (this);
+            loadButton.removeListener (this);
+            saveButton.removeListener (this);
+        }
+
+        void closeButtonPressed() override
+        {
+            owner.closeLargeCodeWindow();
+        }
+
+        void resized() override
+        {
+            DocumentWindow::resized();
+            performLayout();
+        }
+
+    private:
+        void performLayout()
+        {
+            auto bounds = content.getLocalBounds().reduced (14);
+            auto buttons = bounds.removeFromTop (36);
+            saveButton.setBounds (buttons.removeFromRight (78));
+            buttons.removeFromRight (8);
+            loadButton.setBounds (buttons.removeFromRight (78));
+            buttons.removeFromRight (8);
+            resetButton.setBounds (buttons.removeFromRight (78));
+            buttons.removeFromRight (8);
+            applyButton.setBounds (buttons.removeFromRight (104));
+            bounds.removeFromTop (10);
+            editor.setBounds (bounds);
+        }
+
+        void setupButton (juce::TextButton& button, const juce::String& text)
+        {
+            button.setButtonText (text);
+            button.addListener (this);
+            content.addAndMakeVisible (button);
+        }
+
+        void buttonClicked (juce::Button* button) override
+        {
+            if (button == &applyButton) owner.compileScProgram();
+            else if (button == &resetButton) owner.resetScProgram();
+            else if (button == &loadButton) owner.loadScProgram();
+            else if (button == &saveButton) owner.saveScProgram();
+        }
+
+        MainComponent& owner;
+        juce::Component content;
+        juce::CodeEditorComponent editor;
+        juce::TextButton applyButton;
+        juce::TextButton resetButton;
+        juce::TextButton loadButton;
+        juce::TextButton saveButton;
+    };
+
     PipeLookAndFeel lookAndFeel;
     PipeNetwork network;
 
@@ -1355,6 +1436,7 @@ private:
     juce::CodeDocument scCodeDocument;
     juce::CPlusPlusCodeTokeniser scTokeniser;
     std::unique_ptr<juce::CodeEditorComponent> scCodeEditor;
+    std::unique_ptr<LargeCodeWindow> largeCodeWindow;
 
     Tool selectedTool = Tool::select;
     int selectedFace = 0;
@@ -1402,6 +1484,7 @@ private:
     static constexpr int mainViewMenuId = 1001;
     static constexpr int large3DViewMenuId = 1002;
     static constexpr int largeCodeViewMenuId = 1003;
+    static constexpr int openCodeWindowMenuId = 1004;
 
     static juce::var pointToVar (IVec3 point)
     {
@@ -1754,6 +1837,36 @@ private:
         setStatus ("Large code view");
         resized();
         repaint();
+    }
+
+    void openLargeCodeWindow()
+    {
+        if (largeCodeWindow == nullptr)
+            largeCodeWindow = std::make_unique<LargeCodeWindow> (*this);
+        else
+            largeCodeWindow->toFront (true);
+
+        setStatus ("Code window open");
+    }
+
+    void closeLargeCodeWindow()
+    {
+        largeCodeWindow = nullptr;
+        setStatus ("Code window closed");
+    }
+
+    void configureScCodeEditor (juce::CodeEditorComponent& editor)
+    {
+        editor.setFont (juce::FontOptions (14.0f));
+        editor.setTabSize (4, true);
+        editor.setLineNumbersShown (true);
+        editor.setScrollbarThickness (10);
+        editor.setColour (juce::CodeEditorComponent::backgroundColourId, juce::Colour (0xff101525));
+        editor.setColour (juce::CodeEditorComponent::defaultTextColourId, PipeLookAndFeel::ink);
+        editor.setColour (juce::CodeEditorComponent::lineNumberTextId, PipeLookAndFeel::muted.withAlpha (0.72f));
+        editor.setColour (juce::CodeEditorComponent::lineNumberBackgroundId, juce::Colour (0xff15182c));
+        editor.setColour (juce::CodeEditorComponent::highlightColourId, PipeLookAndFeel::pink.withAlpha (0.28f));
+        editor.setColourScheme (makeScEditorColourScheme());
     }
 
     void setTool (Tool tool)
