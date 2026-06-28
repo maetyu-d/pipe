@@ -93,6 +93,13 @@ enum class SoundMode
     superCollider
 };
 
+enum class ScViewMode
+{
+    balanced,
+    large3D,
+    largeCode
+};
+
 struct Cell
 {
     int col = 0;
@@ -883,8 +890,17 @@ public:
         }
         else if (menuName == "View")
         {
-            menu.addItem (mainViewMenuId, "Main View", true, ! large3DView);
-            menu.addItem (large3DViewMenuId, "Large 3D View", true, large3DView);
+            if (soundMode == SoundMode::superCollider)
+            {
+                menu.addItem (mainViewMenuId, "Main View", true, scViewMode == ScViewMode::balanced);
+                menu.addItem (large3DViewMenuId, "Large 3D View", true, scViewMode == ScViewMode::large3D);
+                menu.addItem (largeCodeViewMenuId, "Large Code View", true, scViewMode == ScViewMode::largeCode);
+            }
+            else
+            {
+                menu.addItem (mainViewMenuId, "Main View", true, ! large3DView);
+                menu.addItem (large3DViewMenuId, "Large 3D View", true, large3DView);
+            }
         }
 
         return menu;
@@ -901,9 +917,11 @@ public:
         else if (menuItemID == superColliderSoundModeMenuId)
             setSoundMode (SoundMode::superCollider);
         else if (menuItemID == mainViewMenuId)
-            setLarge3DView (false);
+            setMainView();
         else if (menuItemID == large3DViewMenuId)
-            setLarge3DView (true);
+            setLarge3DView();
+        else if (menuItemID == largeCodeViewMenuId)
+            setLargeCodeView();
     }
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
@@ -1053,10 +1071,15 @@ public:
         nav.removeFromTop (28.0f);
         nav.removeFromTop (18.0f);
         const auto scMode = soundMode == SoundMode::superCollider;
-        const auto reservedForControls = scMode ? 430.0f : (large3DView ? 210.0f : 220.0f);
+        const auto reservedForControls = scMode
+                                            ? (scViewMode == ScViewMode::large3D ? 250.0f
+                                                                                  : scViewMode == ScViewMode::largeCode ? 500.0f : 430.0f)
+                                            : (large3DView ? 210.0f : 220.0f);
         const auto cardSide = juce::jmin (nav.getWidth(),
-                                          juce::jmax (scMode ? 180.0f : 220.0f, nav.getHeight() - reservedForControls),
-                                          scMode ? 250.0f : (large3DView ? 560.0f : 360.0f));
+                                          juce::jmax (scMode ? 160.0f : 220.0f, nav.getHeight() - reservedForControls),
+                                          scMode ? (scViewMode == ScViewMode::large3D ? 520.0f
+                                                                                      : scViewMode == ScViewMode::largeCode ? 190.0f : 250.0f)
+                                                 : (large3DView ? 560.0f : 360.0f));
         const auto card = juce::Rectangle<float> (cardSide, cardSide)
                             .withCentre ({ nav.getCentreX(), nav.getY() + cardSide * 0.5f });
 
@@ -1098,7 +1121,11 @@ public:
         if (scMode)
         {
             auto codePane = layout.preview.reduced (18, 20);
-            codePane.removeFromTop ((int) (card.getBottom() - (float) layout.preview.getY()) + 58);
+            const auto topInset = scViewMode == ScViewMode::largeCode
+                                    ? 74
+                                    : (int) (card.getBottom() - (float) layout.preview.getY())
+                                        + (scViewMode == ScViewMode::large3D ? 74 : 58);
+            codePane.removeFromTop (topInset);
             codePane = codePane.withTrimmedBottom (6);
 
             auto codeHeader = codePane.removeFromTop (34);
@@ -1326,6 +1353,7 @@ private:
     int rootNote = 0;
     int scaleIndex = 2;
     SoundMode soundMode = SoundMode::internal;
+    ScViewMode scViewMode = ScViewMode::balanced;
     bool drawingPipe = false;
     bool drewPipeSegment = false;
     std::optional<Cell> pipeStartCell;
@@ -1364,6 +1392,7 @@ private:
     static constexpr int superColliderSoundModeMenuId = 9502;
     static constexpr int mainViewMenuId = 1001;
     static constexpr int large3DViewMenuId = 1002;
+    static constexpr int largeCodeViewMenuId = 1003;
 
     static juce::var pointToVar (IVec3 point)
     {
@@ -1656,11 +1685,7 @@ private:
 
         layout.tools = bounds.removeFromLeft (88);
 
-        const auto previewWidth = soundMode == SoundMode::superCollider
-                                    ? juce::jlimit (440, 620, (int) std::round ((double) bounds.getWidth() * 0.38))
-                                    : large3DView
-                                    ? juce::jlimit (520, 780, (int) std::round ((double) bounds.getWidth() * 0.56))
-                                    : juce::jlimit (300, 420, bounds.getWidth() / 4);
+        const auto previewWidth = previewWidthFor (bounds.getWidth());
         layout.preview = bounds.removeFromRight (previewWidth);
         layout.editor = bounds;
 
@@ -1672,13 +1697,52 @@ private:
         return layout;
     }
 
-    void setLarge3DView (bool shouldUseLarge3DView)
+    int previewWidthFor (int availableWidth) const
     {
-        if (large3DView == shouldUseLarge3DView)
-            return;
+        if (soundMode == SoundMode::superCollider)
+        {
+            if (scViewMode == ScViewMode::large3D)
+                return juce::jlimit (620, 860, (int) std::round ((double) availableWidth * 0.56));
 
-        large3DView = shouldUseLarge3DView;
-        setStatus (large3DView ? "Large 3D view" : "Main view");
+            if (scViewMode == ScViewMode::largeCode)
+                return juce::jlimit (560, 820, (int) std::round ((double) availableWidth * 0.50));
+
+            return juce::jlimit (440, 620, (int) std::round ((double) availableWidth * 0.38));
+        }
+
+        return large3DView
+                ? juce::jlimit (520, 780, (int) std::round ((double) availableWidth * 0.56))
+                : juce::jlimit (300, 420, availableWidth / 4);
+    }
+
+    void setMainView()
+    {
+        if (soundMode == SoundMode::superCollider)
+            scViewMode = ScViewMode::balanced;
+        else
+            large3DView = false;
+
+        setStatus ("Main view");
+        resized();
+        repaint();
+    }
+
+    void setLarge3DView()
+    {
+        if (soundMode == SoundMode::superCollider)
+            scViewMode = ScViewMode::large3D;
+        else
+            large3DView = true;
+
+        setStatus ("Large 3D view");
+        resized();
+        repaint();
+    }
+
+    void setLargeCodeView()
+    {
+        scViewMode = ScViewMode::largeCode;
+        setStatus ("Large code view");
         resized();
         repaint();
     }
@@ -1870,6 +1934,9 @@ private:
 
         if (soundMode == SoundMode::superCollider)
         {
+            if (scViewMode != ScViewMode::large3D && scViewMode != ScViewMode::largeCode)
+                scViewMode = ScViewMode::balanced;
+
             if (scEngine.isReady())
                 compileScProgram();
             else
@@ -2899,10 +2966,15 @@ private:
         panel.removeFromTop (18.0f);
 
         const auto scMode = soundMode == SoundMode::superCollider;
-        const auto reservedForControls = scMode ? 430.0f : (large3DView ? 210.0f : 220.0f);
+        const auto reservedForControls = scMode
+                                            ? (scViewMode == ScViewMode::large3D ? 250.0f
+                                                                                  : scViewMode == ScViewMode::largeCode ? 500.0f : 430.0f)
+                                            : (large3DView ? 210.0f : 220.0f);
         const auto cardSide = juce::jmin (panel.getWidth(),
-                                          juce::jmax (scMode ? 180.0f : 220.0f, panel.getHeight() - reservedForControls),
-                                          scMode ? 250.0f : (large3DView ? 560.0f : 360.0f));
+                                          juce::jmax (scMode ? 160.0f : 220.0f, panel.getHeight() - reservedForControls),
+                                          scMode ? (scViewMode == ScViewMode::large3D ? 520.0f
+                                                                                      : scViewMode == ScViewMode::largeCode ? 190.0f : 250.0f)
+                                                 : (large3DView ? 560.0f : 360.0f));
         const auto card = juce::Rectangle<float> (cardSide, cardSide)
                             .withCentre ({ panel.getCentreX(), panel.getY() + cardSide * 0.5f });
         const auto area = card.reduced (30.0f, 28.0f);
