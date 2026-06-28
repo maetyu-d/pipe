@@ -1042,10 +1042,11 @@ public:
         auto nav = layout.preview.reduced (18, 20).toFloat();
         nav.removeFromTop (28.0f);
         nav.removeFromTop (18.0f);
-        const auto reservedForControls = large3DView ? 210.0f : 220.0f;
+        const auto scMode = soundMode == SoundMode::superCollider;
+        const auto reservedForControls = scMode ? 430.0f : (large3DView ? 210.0f : 220.0f);
         const auto cardSide = juce::jmin (nav.getWidth(),
-                                          juce::jmax (220.0f, nav.getHeight() - reservedForControls),
-                                          large3DView ? 560.0f : 360.0f);
+                                          juce::jmax (scMode ? 180.0f : 220.0f, nav.getHeight() - reservedForControls),
+                                          scMode ? 250.0f : (large3DView ? 560.0f : 360.0f));
         const auto card = juce::Rectangle<float> (cardSide, cardSide)
                             .withCentre ({ nav.getCentreX(), nav.getY() + cardSide * 0.5f });
 
@@ -1084,10 +1085,22 @@ public:
         noteSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 24);
         noteSlider.setBounds (pitchArea);
 
-        auto scArea = pitchArea.withY (pitchArea.getBottom() + 18).withHeight (large3DView ? 130 : 92);
-        compileScButton.setBounds (scArea.removeFromTop (34));
-        scArea.removeFromTop (8);
-        scProgramEditor.setBounds (scArea);
+        if (scMode)
+        {
+            auto codePane = layout.preview.reduced (18, 20);
+            codePane.removeFromTop ((int) (card.getBottom() - (float) layout.preview.getY()) + 58);
+            codePane = codePane.withTrimmedBottom (6);
+
+            auto codeHeader = codePane.removeFromTop (34);
+            compileScButton.setBounds (codeHeader.removeFromRight (104));
+            codePane.removeFromTop (8);
+            scProgramEditor.setBounds (codePane);
+        }
+        else
+        {
+            compileScButton.setBounds ({});
+            scProgramEditor.setBounds ({});
+        }
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -1561,7 +1574,9 @@ private:
 
         layout.tools = bounds.removeFromLeft (88);
 
-        const auto previewWidth = large3DView
+        const auto previewWidth = soundMode == SoundMode::superCollider
+                                    ? juce::jlimit (440, 620, (int) std::round ((double) bounds.getWidth() * 0.38))
+                                    : large3DView
                                     ? juce::jlimit (520, 780, (int) std::round ((double) bounds.getWidth() * 0.56))
                                     : juce::jlimit (300, 420, bounds.getWidth() / 4);
         layout.preview = bounds.removeFromRight (previewWidth);
@@ -1733,9 +1748,16 @@ private:
         scProgramEditor.setVisible (isSc);
         compileScButton.setVisible (isSc);
 
+        for (auto& button : faceButtons)
+            button.setVisible (! isSc);
+
+        layerSlider.setVisible (! isSc);
+        updateInspectorControls();
+
         if (isSc && ! scProgramLoaded && scEngine.isReady())
             compileScProgram();
 
+        resized();
         repaint();
     }
 
@@ -1810,9 +1832,10 @@ private:
     void updateInspectorControls()
     {
         const auto hasValve = selectedValve() != nullptr;
-        noteDownButton.setVisible (hasValve);
-        noteUpButton.setVisible (hasValve);
-        noteSlider.setVisible (hasValve);
+        const auto showValveControls = hasValve && soundMode != SoundMode::superCollider;
+        noteDownButton.setVisible (showValveControls);
+        noteUpButton.setVisible (showValveControls);
+        noteSlider.setVisible (showValveControls);
 
         updatingNoteSlider = true;
         if (const auto* valve = selectedValve())
@@ -2772,10 +2795,11 @@ private:
         auto titleArea = panel.removeFromTop (28.0f);
         panel.removeFromTop (18.0f);
 
-        const auto reservedForControls = large3DView ? 210.0f : 220.0f;
+        const auto scMode = soundMode == SoundMode::superCollider;
+        const auto reservedForControls = scMode ? 430.0f : (large3DView ? 210.0f : 220.0f);
         const auto cardSide = juce::jmin (panel.getWidth(),
-                                          juce::jmax (220.0f, panel.getHeight() - reservedForControls),
-                                          large3DView ? 560.0f : 360.0f);
+                                          juce::jmax (scMode ? 180.0f : 220.0f, panel.getHeight() - reservedForControls),
+                                          scMode ? 250.0f : (large3DView ? 560.0f : 360.0f));
         const auto card = juce::Rectangle<float> (cardSide, cardSide)
                             .withCentre ({ panel.getCentreX(), panel.getY() + cardSide * 0.5f });
         const auto area = card.reduced (30.0f, 28.0f);
@@ -2843,25 +2867,60 @@ private:
                           juce::Justification::centredLeft,
                           1);
 
-        const auto faceLabel = juce::Rectangle<float> (card.getX(),
-                                                       card.getBottom() + 8.0f,
-                                                       card.getWidth(),
-                                                       14.0f);
-        g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
-        g.setFont (juce::FontOptions (9.0f).withStyle ("Bold"));
-        g.drawFittedText ("FACE", faceLabel.toNearestInt(), juce::Justification::centredLeft, 1);
+        if (scMode)
+        {
+            drawScCodePane (g);
+        }
+        else
+        {
+            const auto faceLabel = juce::Rectangle<float> (card.getX(),
+                                                           card.getBottom() + 8.0f,
+                                                           card.getWidth(),
+                                                           14.0f);
+            g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
+            g.setFont (juce::FontOptions (9.0f).withStyle ("Bold"));
+            g.drawFittedText ("FACE", faceLabel.toNearestInt(), juce::Justification::centredLeft, 1);
 
-        const auto layerLabel = juce::Rectangle<float> (card.getX(),
-                                                        card.getBottom() + 122.0f,
-                                                        card.getWidth(),
-                                                        14.0f);
-        g.setColour (PipeLookAndFeel::lemon);
-        g.drawFittedText ("LAYER " + juce::String (selectedDepth + 1).paddedLeft ('0', 2),
-                          layerLabel.toNearestInt(),
+            const auto layerLabel = juce::Rectangle<float> (card.getX(),
+                                                            card.getBottom() + 122.0f,
+                                                            card.getWidth(),
+                                                            14.0f);
+            g.setColour (PipeLookAndFeel::lemon);
+            g.drawFittedText ("LAYER " + juce::String (selectedDepth + 1).paddedLeft ('0', 2),
+                              layerLabel.toNearestInt(),
+                              juce::Justification::centredLeft,
+                              1);
+
+            drawInspector (g, card);
+        }
+    }
+
+    void drawScCodePane (juce::Graphics& g) const
+    {
+        const auto editorBounds = scProgramEditor.getBounds().toFloat();
+        if (editorBounds.isEmpty())
+            return;
+
+        const auto pane = juce::Rectangle<float> (editorBounds.getX() - 10.0f,
+                                                  editorBounds.getY() - 44.0f,
+                                                  editorBounds.getWidth() + 20.0f,
+                                                  editorBounds.getHeight() + 54.0f);
+        g.setColour (PipeLookAndFeel::panel2.withAlpha (0.46f));
+        g.fillRoundedRectangle (pane, 14.0f);
+        g.setColour (PipeLookAndFeel::line.withAlpha (0.42f));
+        g.drawRoundedRectangle (pane, 14.0f, 1.0f);
+
+        auto header = pane.withHeight (34.0f).reduced (10.0f, 0.0f);
+        g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
+        g.setColour (PipeLookAndFeel::mint);
+        g.drawFittedText ("SC CODE", header.toNearestInt(), juce::Justification::centredLeft, 1);
+
+        g.setFont (juce::FontOptions (9.0f));
+        g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
+        g.drawFittedText ("SynthDef body or full SynthDef; receives pipe water parameters",
+                          header.withTrimmedLeft (72.0f).withTrimmedRight ((float) compileScButton.getWidth() + 12.0f).toNearestInt(),
                           juce::Justification::centredLeft,
                           1);
-
-        drawInspector (g, card);
     }
 
     void drawInspector (juce::Graphics& g, juce::Rectangle<float> card) const
