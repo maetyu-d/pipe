@@ -123,8 +123,17 @@ struct Flow
 
 struct Valve
 {
+    Valve() = default;
+    Valve (IVec3 positionIn, int midiNoteIn, juce::String scProgramIn = {})
+        : position (positionIn), midiNote (midiNoteIn), scProgram (std::move (scProgramIn))
+    {
+    }
+
     IVec3 position;
     int midiNote = 60;
+    juce::String scProgram;
+    juce::String scSynthName;
+    bool scProgramLoaded = false;
 };
 
 int signOf (int value) noexcept
@@ -935,7 +944,8 @@ public:
         if (scEngine.prepare (currentSampleRate, scScratch.getNumSamples(), 2))
         {
             scEngine.setMasterLevel (0.82f);
-            compileScProgram();
+            if (soundMode == SoundMode::superCollider)
+                showScProgramForSelection();
         }
     }
 
@@ -1161,7 +1171,9 @@ public:
             return;
 
         hoverCell = *cell;
+        storeScEditorToValve();
         selectedCell = *cell;
+        showScProgramForSelection();
         updateInspectorControls();
 
         if (playing)
@@ -1471,8 +1483,7 @@ private:
     std::vector<Voice> voices;
     gridcollider::EmbeddedScAudioEngine scEngine;
     juce::AudioBuffer<float> scScratch;
-    juce::String scSynthName = "pipe_sc";
-    bool scProgramLoaded = false;
+    std::optional<IVec3> scEditorValve;
 
     juce::String status = "Ready";
     bool large3DView = false;
@@ -1535,8 +1546,10 @@ private:
         return points;
     }
 
-    juce::var createPatch() const
+    juce::var createPatch()
     {
+        storeScEditorToValve();
+
         auto* root = new juce::DynamicObject();
         root->setProperty ("version", 1);
         root->setProperty ("size", gridSize);
@@ -1559,6 +1572,7 @@ private:
             object->setProperty ("y", valve.position.y);
             object->setProperty ("z", valve.position.z);
             object->setProperty ("note", valve.midiNote);
+            object->setProperty ("scProgram", scProgramForValve (valve));
             valveArray.add (object);
         }
         root->setProperty ("valves", valveArray);
@@ -1568,7 +1582,7 @@ private:
         root->setProperty ("rootNote", rootNote);
         root->setProperty ("scale", scaleIndex);
         root->setProperty ("soundMode", soundMode == SoundMode::superCollider ? "sc" : "internal");
-        root->setProperty ("scProgram", getScProgramText());
+        root->setProperty ("scProgram", defaultScProgram());
 
         return root;
     }
@@ -1590,13 +1604,16 @@ private:
         loaded.disabledTaps = loadPointArray (patch.getProperty ("disabledTaps", {}));
         loaded.drains = loadPointArray (patch.getProperty ("drains", {}));
         loaded.closedDrains = loadPointArray (patch.getProperty ("closedDrains", {}));
+        const auto fallbackScProgram = patch.getProperty ("scProgram", defaultScProgram()).toString();
 
         if (const auto* valves = patch.getProperty ("valves", {}).getArray())
         {
             for (const auto& item : *valves)
             {
                 if (const auto point = pointFromVar (item))
-                    loaded.valves.push_back ({ *point, juce::jlimit (24, 96, (int) item.getProperty ("note", defaultValveNoteFor (*point))) });
+                    loaded.valves.push_back ({ *point,
+                                               juce::jlimit (24, 96, (int) item.getProperty ("note", defaultValveNoteFor (*point))),
+                                               item.getProperty ("scProgram", fallbackScProgram).toString() });
             }
         }
 
@@ -1609,7 +1626,7 @@ private:
         scaleIndex = juce::jlimit (0, 4, (int) patch.getProperty ("scale", scaleIndex));
         soundMode = patch.getProperty ("soundMode", "internal").toString() == "sc" ? SoundMode::superCollider
                                                                                    : SoundMode::internal;
-        setScProgramText (patch.getProperty ("scProgram", defaultScProgram()).toString());
+        scEditorValve.reset();
         tempoSlider.setValue (bpm, juce::dontSendNotification);
         keyBox.setSelectedItemIndex (rootNote, juce::dontSendNotification);
         scaleBox.setSelectedItemIndex (scaleIndex, juce::dontSendNotification);
@@ -1617,8 +1634,7 @@ private:
         setSelectedFace ((int) patch.getProperty ("face", selectedFace));
         setPlaying (false);
         updateSoundModeControls();
-        if (soundMode == SoundMode::superCollider)
-            compileScProgram();
+        showScProgramForSelection();
         updateInspectorControls();
         setStatus ("Patch loaded");
         return true;
@@ -1669,7 +1685,9 @@ private:
         setSelectedFace (0);
         selectedDepth = 0;
         selectedCell.reset();
+        scEditorValve.reset();
         layerSlider.setValue (1.0, juce::dontSendNotification);
+        showScProgramForSelection();
         updateInspectorControls();
         setStatus ("Demo loaded");
         repaint();
@@ -1681,6 +1699,8 @@ private:
         beginChange();
         network.clear();
         selectedCell.reset();
+        scEditorValve.reset();
+        showScProgramForSelection();
         updateInspectorControls();
         setStatus ("New patch");
         repaint();
@@ -1691,16 +1711,67 @@ private:
         return scCodeDocument.getAllContent();
     }
 
-    void setScProgramText (const juce::String& text)
+    juce::String scProgramForValve (const Valve& valve) const
     {
-        scCodeDocument.replaceAllContent (text);
-        scProgramLoaded = false;
+        return valve.scProgram.isNotEmpty() ? valve.scProgram : defaultScProgram();
+    }
+
+    Valve* valveForScEditor()
+    {
+        return scEditorValve.has_value() ? network.valveAt (*scEditorValve) : nullptr;
+    }
+
+    void storeScEditorToValve()
+    {
+        if (auto* valve = valveForScEditor())
+        {
+            const auto text = getScProgramText();
+            if (valve->scProgram != text)
+            {
+                valve->scProgram = text;
+                valve->scProgramLoaded = false;
+            }
+        }
+    }
+
+    void showScProgramForSelection()
+    {
+        storeScEditorToValve();
+
+        if (auto* valve = selectedValve())
+        {
+            scEditorValve = valve->position;
+            scCodeDocument.replaceAllContent (scProgramForValve (*valve));
+        }
+        else
+        {
+            scEditorValve.reset();
+            scCodeDocument.replaceAllContent ("// Select a valve to edit its SuperCollider script.\n"
+                                              + defaultScProgram());
+        }
+    }
+
+    bool setSelectedValveScProgram (const juce::String& text)
+    {
+        if (auto* valve = selectedValve())
+        {
+            valve->scProgram = text;
+            valve->scProgramLoaded = false;
+            scEditorValve = valve->position;
+            scCodeDocument.replaceAllContent (text);
+            return true;
+        }
+
+        setStatus ("Select a valve for SC code");
+        return false;
     }
 
     void resetScProgram()
     {
-        setScProgramText (defaultScProgram());
-        setStatus ("SC code reset");
+        if (! setSelectedValveScProgram (defaultScProgram()))
+            return;
+
+        setStatus ("Valve SC code reset");
         if (soundMode == SoundMode::superCollider)
             compileScProgram();
     }
@@ -1717,7 +1788,8 @@ private:
                                       if (file == juce::File())
                                           return;
 
-                                      setStatus (file.replaceWithText (getScProgramText()) ? "SC code saved"
+                                      storeScEditorToValve();
+                                      setStatus (file.replaceWithText (getScProgramText()) ? "Valve SC code saved"
                                                                                             : "Could not save SC code");
                                   });
     }
@@ -1734,8 +1806,10 @@ private:
                                       if (file == juce::File())
                                           return;
 
-                                      setScProgramText (file.loadFileAsString());
-                                      setStatus ("SC code loaded");
+                                      if (! setSelectedValveScProgram (file.loadFileAsString()))
+                                          return;
+
+                                      setStatus ("Valve SC code loaded");
                                       if (soundMode == SoundMode::superCollider)
                                           compileScProgram();
                                   });
@@ -1761,6 +1835,7 @@ private:
 
     void beginChange()
     {
+        storeScEditorToValve();
         undoStack.push_back (network);
         if (undoStack.size() > 80)
             undoStack.erase (undoStack.begin());
@@ -1777,6 +1852,7 @@ private:
         network = undoStack.back();
         undoStack.pop_back();
         flows.clear();
+        showScProgramForSelection();
         updateInspectorControls();
         setStatus ("Undo");
         repaint();
@@ -1792,6 +1868,7 @@ private:
         network = redoStack.back();
         redoStack.pop_back();
         flows.clear();
+        showScProgramForSelection();
         updateInspectorControls();
         setStatus ("Redo");
         repaint();
@@ -1932,6 +2009,7 @@ private:
 
     void setSelectedFace (int faceIndex)
     {
+        storeScEditorToValve();
         selectedFace = juce::jlimit (0, 5, faceIndex);
         faceBox.setSelectedItemIndex (selectedFace, juce::dontSendNotification);
 
@@ -1939,6 +2017,7 @@ private:
             updateGravityForSelectedFace();
 
         updateButtonStates();
+        showScProgramForSelection();
         updateInspectorControls();
         repaint();
     }
@@ -1981,6 +2060,13 @@ private:
     {
         const auto voxel = selectedVoxel();
         return voxel.has_value() ? network.valveAt (*voxel) : nullptr;
+    }
+
+    static juce::String valveLabel (IVec3 voxel)
+    {
+        return "X" + juce::String (voxel.x + 1).paddedLeft ('0', 2)
+             + " Y" + juce::String (voxel.y + 1).paddedLeft ('0', 2)
+             + " Z" + juce::String (voxel.z + 1).paddedLeft ('0', 2);
     }
 
     static juce::String noteName (int midiNote)
@@ -2042,7 +2128,29 @@ private:
 
     bool compileScProgram()
     {
-        scProgramLoaded = false;
+        storeScEditorToValve();
+
+        if (auto* valve = selectedValve())
+            return compileValveScProgram (*valve);
+
+        setStatus ("Select a valve for SC code");
+        return false;
+    }
+
+    bool ensureValveScProgram (Valve& valve)
+    {
+        if (scEditorValve.has_value() && *scEditorValve == valve.position)
+            storeScEditorToValve();
+
+        if (valve.scProgramLoaded && valve.scSynthName.isNotEmpty())
+            return true;
+
+        return compileValveScProgram (valve);
+    }
+
+    bool compileValveScProgram (Valve& valve)
+    {
+        valve.scProgramLoaded = false;
 
         if (! scEngine.isReady())
         {
@@ -2050,17 +2158,25 @@ private:
             return false;
         }
 
-        scSynthName = "pipe_sc_" + juce::String (juce::Time::getMillisecondCounter());
-        const auto source = wrappedScProgram (scSynthName, getScProgramText());
+        valve.scSynthName = "pipe_sc_"
+                           + juce::String (juce::Time::getMillisecondCounter())
+                           + "_"
+                           + juce::String (valve.position.x)
+                           + "_"
+                           + juce::String (valve.position.y)
+                           + "_"
+                           + juce::String (valve.position.z);
 
-        if (! scEngine.loadSynthDef (scSynthName, source))
+        const auto source = wrappedScProgram (valve.scSynthName, scProgramForValve (valve));
+
+        if (! scEngine.loadSynthDef (valve.scSynthName, source))
         {
-            setStatus ("SC compile failed");
+            setStatus ("Valve SC compile failed");
             return false;
         }
 
-        scProgramLoaded = true;
-        setStatus ("SC program ready");
+        valve.scProgramLoaded = true;
+        setStatus ("Valve SC ready " + valveLabel (valve.position));
         return true;
     }
 
@@ -2080,8 +2196,8 @@ private:
         layerSlider.setVisible (! isSc);
         updateInspectorControls();
 
-        if (isSc && ! scProgramLoaded && scEngine.isReady())
-            compileScProgram();
+        if (isSc && scEngine.isReady())
+            showScProgramForSelection();
 
         resized();
         repaint();
@@ -2206,6 +2322,7 @@ private:
 
         beginChange();
         network.eraseVoxel (cellToVoxel (selectedFace, selectedDepth, *selectedCell));
+        showScProgramForSelection();
         updateInspectorControls();
         setStatus ("Selection deleted");
         repaint();
@@ -2243,6 +2360,7 @@ private:
                 if (auto* valve = network.valveAt (voxel))
                     valve->midiNote = defaultMusicalNoteFor (voxel);
             setStatus (network.hasValve (voxel) ? "Valve added" : "Valve removed");
+            showScProgramForSelection();
         }
         else if (selectedTool == Tool::drain)
         {
@@ -2254,6 +2372,7 @@ private:
         {
             beginChange();
             network.eraseVoxel (voxel);
+            showScProgramForSelection();
             setStatus ("Cell erased");
         }
 
@@ -2553,7 +2672,7 @@ private:
 
     void triggerValve (IVec3 voxel, const Flow& flow)
     {
-        const auto* valve = network.valveAt (voxel);
+        auto* valve = network.valveAt (voxel);
         const auto rawMidiNote = valve != nullptr ? valve->midiNote : defaultMusicalNoteFor (voxel);
         const auto midiNote = noteInCurrentScale (rawMidiNote);
         const auto exits = (double) network.validConnectedBits (voxel).size();
@@ -2566,14 +2685,14 @@ private:
         event.brightness = juce::jlimit (0.06, 0.42, 0.10 + height * 0.16 + travelEnergy * 0.08 + (flow.falling ? 0.10 : 0.0));
         event.pan = juce::jlimit (-0.85, 0.85, ((double) voxel.x / (double) (gridSize - 1)) * 1.7 - 0.85);
 
-        if (soundMode == SoundMode::superCollider && scEngine.isReady() && scProgramLoaded)
+        if (soundMode == SoundMode::superCollider && scEngine.isReady() && valve != nullptr && ensureValveScProgram (*valve))
         {
             gridcollider::EventFields fields;
             fields.timestampSeconds = animationPhase;
             fields.tick = (std::uint64_t) juce::jmax (0.0, animationPhase * bpm / 60.0);
             fields.sourceCell = { juce::jlimit (0, 63, juce::roundToInt ((float) voxel.x / (float) (gridSize - 1) * 63.0f)),
                                   juce::jlimit (0, 63, juce::roundToInt ((float) voxel.y / (float) (gridSize - 1) * 63.0f)) };
-            fields.instrumentName = scSynthName;
+            fields.instrumentName = valve->scSynthName;
             fields.pitch = midiNote;
             fields.velocity = juce::jlimit (0.0f, 1.0f, (float) (event.level * 8.0));
             fields.durationTicks = flow.falling ? 2 : 1;
@@ -2923,7 +3042,7 @@ private:
             }
         }
 
-        for (const auto valve : network.valves)
+        for (const auto& valve : network.valves)
         {
             if (const auto display = voxelToCellOnFaceDepth (selectedFace, selectedDepth, valve.position))
             {
@@ -3251,12 +3370,14 @@ private:
         auto header = pane.withHeight (34.0f).reduced (10.0f, 0.0f);
         g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
         g.setColour (PipeLookAndFeel::mint);
-        g.drawFittedText ("SC CODE", header.toNearestInt(), juce::Justification::centredLeft, 1);
+        const auto title = scEditorValve.has_value() ? "SC CODE - " + valveLabel (*scEditorValve)
+                                                     : "SC CODE - SELECT VALVE";
+        g.drawFittedText (title, header.toNearestInt(), juce::Justification::centredLeft, 1);
 
         g.setFont (juce::FontOptions (9.0f));
         g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
-        g.drawFittedText ("SynthDef body or full SynthDef; receives pipe water parameters",
-                          header.withTrimmedLeft (72.0f).withTrimmedRight (342.0f).toNearestInt(),
+        g.drawFittedText ("Each valve keeps its own SynthDef body or full SynthDef",
+                          header.withTrimmedLeft (142.0f).withTrimmedRight (342.0f).toNearestInt(),
                           juce::Justification::centredLeft,
                           1);
     }
@@ -3330,7 +3451,7 @@ private:
                 g.drawLine (point.x - 5.0f, point.y + 5.0f, point.x + 5.0f, point.y - 5.0f, 1.6f);
         }
 
-        for (const auto valve : network.valves)
+        for (const auto& valve : network.valves)
         {
             const auto point = isoPoint ({ (float) valve.position.x, (float) valve.position.y, (float) valve.position.z }, area);
             g.setColour (PipeLookAndFeel::pink.withAlpha (0.24f));
@@ -3437,8 +3558,10 @@ private:
     {
         if (slider == &layerSlider)
         {
+            storeScEditorToValve();
             selectedDepth = juce::jlimit (0, gridSize - 1, (int) std::round (layerSlider.getValue()) - 1);
             layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
+            showScProgramForSelection();
             updateInspectorControls();
             repaint();
         }
