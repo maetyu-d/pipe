@@ -801,12 +801,6 @@ public:
         scaleBox.addListener (this);
         addAndMakeVisible (scaleBox);
 
-        soundModeBox.addItem ("JUCE", 1);
-        soundModeBox.addItem ("SC", 2);
-        soundModeBox.setSelectedId (1, juce::dontSendNotification);
-        soundModeBox.addListener (this);
-        addAndMakeVisible (soundModeBox);
-
         scProgramEditor.setMultiLine (true);
         scProgramEditor.setReturnKeyStartsNewLine (true);
         scProgramEditor.setScrollbarsShown (true);
@@ -860,7 +854,7 @@ public:
 
     juce::StringArray getMenuBarNames() override
     {
-        return { "File", "View" };
+        return { "File", "Mode", "View" };
     }
 
     juce::PopupMenu getMenuForIndex (int, const juce::String& menuName) override
@@ -871,6 +865,11 @@ public:
         {
             menu.addItem (savePatchMenuId, "Save Patch...");
             menu.addItem (loadPatchMenuId, "Load Patch...");
+        }
+        else if (menuName == "Mode")
+        {
+            menu.addItem (internalSoundModeMenuId, "JUCE Sound", true, soundMode == SoundMode::internal);
+            menu.addItem (superColliderSoundModeMenuId, "SuperCollider Sound", true, soundMode == SoundMode::superCollider);
         }
         else if (menuName == "View")
         {
@@ -887,6 +886,10 @@ public:
             savePatchAs();
         else if (menuItemID == loadPatchMenuId)
             loadPatch();
+        else if (menuItemID == internalSoundModeMenuId)
+            setSoundMode (SoundMode::internal);
+        else if (menuItemID == superColliderSoundModeMenuId)
+            setSoundMode (SoundMode::superCollider);
         else if (menuItemID == mainViewMenuId)
             setLarge3DView (false);
         else if (menuItemID == large3DViewMenuId)
@@ -1014,8 +1017,6 @@ public:
         keyBox.setBounds (top.removeFromLeft (62));
         top.removeFromLeft (6);
         scaleBox.setBounds (top.removeFromLeft (116));
-        top.removeFromLeft (12);
-        soundModeBox.setBounds (top.removeFromLeft (78));
         top.removeFromLeft (12);
         playButton.setBounds (top.removeFromLeft (72));
         top.removeFromLeft (6);
@@ -1260,7 +1261,6 @@ private:
     juce::ComboBox faceBox;
     juce::ComboBox keyBox;
     juce::ComboBox scaleBox;
-    juce::ComboBox soundModeBox;
     std::array<juce::TextButton, 6> faceButtons;
     juce::Slider layerSlider;
     juce::Slider tempoSlider;
@@ -1320,6 +1320,8 @@ private:
 
     static constexpr int savePatchMenuId = 9001;
     static constexpr int loadPatchMenuId = 9002;
+    static constexpr int internalSoundModeMenuId = 9501;
+    static constexpr int superColliderSoundModeMenuId = 9502;
     static constexpr int mainViewMenuId = 1001;
     static constexpr int large3DViewMenuId = 1002;
 
@@ -1444,7 +1446,6 @@ private:
         tempoSlider.setValue (bpm, juce::dontSendNotification);
         keyBox.setSelectedItemIndex (rootNote, juce::dontSendNotification);
         scaleBox.setSelectedItemIndex (scaleIndex, juce::dontSendNotification);
-        soundModeBox.setSelectedItemIndex (soundMode == SoundMode::superCollider ? 1 : 0, juce::dontSendNotification);
         layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
         setSelectedFace ((int) patch.getProperty ("face", selectedFace));
         setPlaying (false);
@@ -1736,6 +1737,25 @@ private:
             compileScProgram();
 
         repaint();
+    }
+
+    void setSoundMode (SoundMode mode)
+    {
+        soundMode = mode;
+
+        if (soundMode == SoundMode::superCollider)
+        {
+            if (scEngine.isReady())
+                compileScProgram();
+            else
+                setStatus ("SC unavailable");
+        }
+        else
+        {
+            setStatus ("JUCE sound mode");
+        }
+
+        updateSoundModeControls();
     }
 
     const std::vector<int>& currentScale() const
@@ -2264,7 +2284,6 @@ private:
         g.drawFittedText ("Tempo", tempoSlider.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
         g.drawFittedText ("Key", keyBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
         g.drawFittedText ("Scale", scaleBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
-        g.drawFittedText ("Sound", soundModeBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
     }
 
     void drawToolRail (juce::Graphics& g, const Layout& layout)
@@ -3074,24 +3093,6 @@ private:
             updateInspectorControls();
             setStatus ("Scale " + scaleNameForIndex (scaleIndex));
             repaint();
-        }
-        else if (comboBoxThatHasChanged == &soundModeBox)
-        {
-            soundMode = soundModeBox.getSelectedItemIndex() == 1 ? SoundMode::superCollider
-                                                                 : SoundMode::internal;
-            if (soundMode == SoundMode::superCollider)
-            {
-                if (scEngine.isReady())
-                    compileScProgram();
-                else
-                    setStatus ("SC unavailable");
-            }
-            else
-            {
-                setStatus ("JUCE sound mode");
-            }
-
-            updateSoundModeControls();
         }
     }
 };
