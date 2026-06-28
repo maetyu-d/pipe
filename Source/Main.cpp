@@ -1,6 +1,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include "EmbeddedScAudioEngine.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -83,6 +85,12 @@ enum class Tool
     valve,
     drain,
     erase
+};
+
+enum class SoundMode
+{
+    internal,
+    superCollider
 };
 
 struct Cell
@@ -793,6 +801,23 @@ public:
         scaleBox.addListener (this);
         addAndMakeVisible (scaleBox);
 
+        soundModeBox.addItem ("JUCE", 1);
+        soundModeBox.addItem ("SC", 2);
+        soundModeBox.setSelectedId (1, juce::dontSendNotification);
+        soundModeBox.addListener (this);
+        addAndMakeVisible (soundModeBox);
+
+        scProgramEditor.setMultiLine (true);
+        scProgramEditor.setReturnKeyStartsNewLine (true);
+        scProgramEditor.setScrollbarsShown (true);
+        scProgramEditor.setFont (juce::FontOptions (11.0f));
+        scProgramEditor.setColour (juce::TextEditor::backgroundColourId, PipeLookAndFeel::panel2.withAlpha (0.70f));
+        scProgramEditor.setColour (juce::TextEditor::textColourId, PipeLookAndFeel::ink);
+        scProgramEditor.setColour (juce::TextEditor::outlineColourId, PipeLookAndFeel::line.withAlpha (0.55f));
+        scProgramEditor.setText (defaultScProgram(), juce::dontSendNotification);
+        scProgramEditor.setVisible (false);
+        addAndMakeVisible (scProgramEditor);
+
         for (int i = 0; i < (int) faceButtons.size(); ++i)
             setupButton (faceButtons[(size_t) i], faces[(size_t) i].name, "Show this cube face in the 2D editor");
 
@@ -812,10 +837,12 @@ public:
         setupButton (clearButton, "CLEAR", "Clear every pipe, tap, valve and drain");
         setupButton (noteDownButton, "NOTE -", "Lower the selected valve note");
         setupButton (noteUpButton, "NOTE +", "Raise the selected valve note");
+        setupButton (compileScButton, "APPLY SC", "Compile the SuperCollider program for SC mode");
         noteSlider.setTooltip ("Tune the selected valve");
         noteDownButton.setVisible (false);
         noteUpButton.setVisible (false);
         noteSlider.setVisible (false);
+        compileScButton.setVisible (false);
 
         network.loadDemo();
         updateButtonStates();
@@ -866,20 +893,43 @@ public:
             setLarge3DView (true);
     }
 
-    void prepareToPlay (int, double sampleRate) override
+    void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
     {
         currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
         voices.clear();
+        scScratch.setSize (2, juce::jmax (64, samplesPerBlockExpected));
+
+        if (scEngine.prepare (currentSampleRate, scScratch.getNumSamples(), 2))
+        {
+            scEngine.setMasterLevel (0.82f);
+            compileScProgram();
+        }
     }
 
     void releaseResources() override
     {
         voices.clear();
+        scEngine.release();
+        scScratch.setSize (0, 0);
     }
 
     void getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill) override
     {
         bufferToFill.clearActiveBufferRegion();
+
+        if (soundMode == SoundMode::superCollider && scEngine.isReady())
+        {
+            scEngine.setTransport (bpm,
+                                   (std::uint64_t) juce::jmax (0.0, animationPhase * bpm / 60.0),
+                                   playing);
+            scScratch.setSize (bufferToFill.buffer->getNumChannels(), bufferToFill.numSamples, false, false, true);
+            scEngine.render (scScratch);
+
+            for (int channel = 0; channel < bufferToFill.buffer->getNumChannels(); ++channel)
+                bufferToFill.buffer->addFrom (channel, bufferToFill.startSample, scScratch, channel, 0, bufferToFill.numSamples);
+
+            return;
+        }
 
         std::vector<NoteEvent> pending;
         {
@@ -965,6 +1015,8 @@ public:
         top.removeFromLeft (6);
         scaleBox.setBounds (top.removeFromLeft (116));
         top.removeFromLeft (12);
+        soundModeBox.setBounds (top.removeFromLeft (78));
+        top.removeFromLeft (12);
         playButton.setBounds (top.removeFromLeft (72));
         top.removeFromLeft (6);
         stopButton.setBounds (top.removeFromLeft (72));
@@ -1030,6 +1082,11 @@ public:
         noteSlider.setSliderStyle (juce::Slider::LinearHorizontal);
         noteSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 24);
         noteSlider.setBounds (pitchArea);
+
+        auto scArea = pitchArea.withY (pitchArea.getBottom() + 18).withHeight (large3DView ? 130 : 92);
+        compileScButton.setBounds (scArea.removeFromTop (34));
+        scArea.removeFromTop (8);
+        scProgramEditor.setBounds (scArea);
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -1203,6 +1260,7 @@ private:
     juce::ComboBox faceBox;
     juce::ComboBox keyBox;
     juce::ComboBox scaleBox;
+    juce::ComboBox soundModeBox;
     std::array<juce::TextButton, 6> faceButtons;
     juce::Slider layerSlider;
     juce::Slider tempoSlider;
@@ -1219,12 +1277,15 @@ private:
     juce::TextButton clearButton;
     juce::TextButton noteDownButton;
     juce::TextButton noteUpButton;
+    juce::TextButton compileScButton;
+    juce::TextEditor scProgramEditor;
 
     Tool selectedTool = Tool::select;
     int selectedFace = 0;
     int selectedDepth = 0;
     int rootNote = 0;
     int scaleIndex = 2;
+    SoundMode soundMode = SoundMode::internal;
     bool drawingPipe = false;
     bool drewPipeSegment = false;
     std::optional<Cell> pipeStartCell;
@@ -1245,6 +1306,10 @@ private:
     juce::CriticalSection noteLock;
     std::vector<NoteEvent> pendingNotes;
     std::vector<Voice> voices;
+    gridcollider::EmbeddedScAudioEngine scEngine;
+    juce::AudioBuffer<float> scScratch;
+    juce::String scSynthName = "pipe_sc";
+    bool scProgramLoaded = false;
 
     juce::String status = "Ready";
     bool large3DView = false;
@@ -1333,6 +1398,8 @@ private:
         root->setProperty ("tempo", bpm);
         root->setProperty ("rootNote", rootNote);
         root->setProperty ("scale", scaleIndex);
+        root->setProperty ("soundMode", soundMode == SoundMode::superCollider ? "sc" : "internal");
+        root->setProperty ("scProgram", scProgramEditor.getText());
 
         return root;
     }
@@ -1371,12 +1438,19 @@ private:
         bpm = juce::jlimit (40.0, 220.0, (double) patch.getProperty ("tempo", bpm));
         rootNote = juce::jlimit (0, 11, (int) patch.getProperty ("rootNote", rootNote));
         scaleIndex = juce::jlimit (0, 4, (int) patch.getProperty ("scale", scaleIndex));
+        soundMode = patch.getProperty ("soundMode", "internal").toString() == "sc" ? SoundMode::superCollider
+                                                                                   : SoundMode::internal;
+        scProgramEditor.setText (patch.getProperty ("scProgram", defaultScProgram()).toString(), juce::dontSendNotification);
         tempoSlider.setValue (bpm, juce::dontSendNotification);
         keyBox.setSelectedItemIndex (rootNote, juce::dontSendNotification);
         scaleBox.setSelectedItemIndex (scaleIndex, juce::dontSendNotification);
+        soundModeBox.setSelectedItemIndex (soundMode == SoundMode::superCollider ? 1 : 0, juce::dontSendNotification);
         layerSlider.setValue (selectedDepth + 1, juce::dontSendNotification);
         setSelectedFace ((int) patch.getProperty ("face", selectedFace));
         setPlaying (false);
+        updateSoundModeControls();
+        if (soundMode == SoundMode::superCollider)
+            compileScProgram();
         updateInspectorControls();
         setStatus ("Patch loaded");
         return true;
@@ -1599,6 +1673,69 @@ private:
             "Major", "Minor", "Pentatonic", "Dorian", "Whole"
         }};
         return names[(size_t) juce::jlimit (0, (int) names.size() - 1, index)];
+    }
+
+    static juce::String defaultScProgram()
+    {
+        return R"SC(|out = 0, pitch = 60, amp = 0.18, sustain = 0.35, pan = 0, brightness = 0.2, water = 0.5, height = 0.5, falling = 0|
+    var freq = pitch.midicps;
+    var env = EnvGen.kr(Env.perc(0.004, sustain.max(0.04), curve: -5), doneAction: 2);
+    var source = SinOsc.ar(freq) + (Pulse.ar(freq * 0.5, 0.42) * 0.22);
+    var shimmer = BPF.ar(WhiteNoise.ar, (freq * (5 + brightness * 20)).clip(900, 12000), 0.18) * water;
+    var sig = RLPF.ar(source, (freq * (2.5 + brightness * 12)).clip(180, 9000), 0.24);
+    sig = (sig + shimmer + (SinOsc.ar(freq * 2.01) * falling * 0.18)) * env * amp * (0.75 + height * 0.5);
+    Out.ar(out, Pan2.ar(sig.tanh, pan));
+)SC";
+    }
+
+    static juce::String wrappedScProgram (const juce::String& synthName, juce::String program)
+    {
+        const auto trimmed = program.trim();
+
+        if (trimmed.containsIgnoreCase ("SynthDef("))
+            return trimmed.replace ("__name__", synthName, true);
+
+        return "SynthDef(\\"
+            + synthName
+            + ", {\n"
+            + trimmed
+            + "\n})";
+    }
+
+    bool compileScProgram()
+    {
+        scProgramLoaded = false;
+
+        if (! scEngine.isReady())
+        {
+            setStatus ("SC unavailable");
+            return false;
+        }
+
+        scSynthName = "pipe_sc_" + juce::String (juce::Time::getMillisecondCounter());
+        const auto source = wrappedScProgram (scSynthName, scProgramEditor.getText());
+
+        if (! scEngine.loadSynthDef (scSynthName, source))
+        {
+            setStatus ("SC compile failed");
+            return false;
+        }
+
+        scProgramLoaded = true;
+        setStatus ("SC program ready");
+        return true;
+    }
+
+    void updateSoundModeControls()
+    {
+        const auto isSc = soundMode == SoundMode::superCollider;
+        scProgramEditor.setVisible (isSc);
+        compileScButton.setVisible (isSc);
+
+        if (isSc && ! scProgramLoaded && scEngine.isReady())
+            compileScProgram();
+
+        repaint();
     }
 
     const std::vector<int>& currentScale() const
@@ -2046,16 +2183,39 @@ private:
         const auto* valve = network.valveAt (voxel);
         const auto rawMidiNote = valve != nullptr ? valve->midiNote : defaultMusicalNoteFor (voxel);
         const auto midiNote = noteInCurrentScale (rawMidiNote);
-        const auto frequency = juce::MidiMessage::getMidiNoteInHertz (midiNote);
         const auto exits = (double) network.validConnectedBits (voxel).size();
         const auto height = (double) voxel.y / (double) (gridSize - 1);
         const auto travelEnergy = juce::jlimit (0.0, 1.0, flow.progress);
 
         NoteEvent event;
-        event.frequency = frequency;
+        event.frequency = juce::MidiMessage::getMidiNoteInHertz (midiNote);
         event.level = juce::jlimit (0.035, 0.12, 0.052 + exits * 0.008 + (flow.falling ? 0.026 : 0.0));
         event.brightness = juce::jlimit (0.06, 0.42, 0.10 + height * 0.16 + travelEnergy * 0.08 + (flow.falling ? 0.10 : 0.0));
         event.pan = juce::jlimit (-0.85, 0.85, ((double) voxel.x / (double) (gridSize - 1)) * 1.7 - 0.85);
+
+        if (soundMode == SoundMode::superCollider && scEngine.isReady() && scProgramLoaded)
+        {
+            gridcollider::EventFields fields;
+            fields.timestampSeconds = animationPhase;
+            fields.tick = (std::uint64_t) juce::jmax (0.0, animationPhase * bpm / 60.0);
+            fields.sourceCell = { juce::jlimit (0, 63, juce::roundToInt ((float) voxel.x / (float) (gridSize - 1) * 63.0f)),
+                                  juce::jlimit (0, 63, juce::roundToInt ((float) voxel.y / (float) (gridSize - 1) * 63.0f)) };
+            fields.instrumentName = scSynthName;
+            fields.pitch = midiNote;
+            fields.velocity = juce::jlimit (0.0f, 1.0f, (float) (event.level * 8.0));
+            fields.durationTicks = flow.falling ? 2 : 1;
+            fields.parameters["pan"] = juce::String ((float) event.pan, 3);
+            fields.parameters["brightness"] = juce::String ((float) event.brightness, 3);
+            fields.parameters["water"] = juce::String ((float) travelEnergy, 3);
+            fields.parameters["height"] = juce::String ((float) height, 3);
+            fields.parameters["falling"] = flow.falling ? "1" : "0";
+            fields.parameters["exits"] = juce::String ((float) exits, 3);
+            fields.parameters["tempo"] = juce::String ((float) bpm, 3);
+
+            scEngine.setTransport (bpm, fields.tick, playing);
+            scEngine.enqueue ({ gridcollider::InternalEvent { gridcollider::NoteEvent { fields } } });
+            return;
+        }
 
         const juce::ScopedLock lock (noteLock);
         pendingNotes.push_back (event);
@@ -2104,6 +2264,7 @@ private:
         g.drawFittedText ("Tempo", tempoSlider.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
         g.drawFittedText ("Key", keyBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
         g.drawFittedText ("Scale", scaleBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
+        g.drawFittedText ("Sound", soundModeBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
     }
 
     void drawToolRail (juce::Graphics& g, const Layout& layout)
@@ -2817,7 +2978,10 @@ private:
                          + juce::String ((int) network.taps.size()) + " taps / "
                          + juce::String ((int) network.valves.size()) + " valves / "
                          + juce::String ((int) network.drains.size()) + " drains / "
-                         + juce::String ((int) flows.size()) + " water";
+                         + juce::String ((int) flows.size()) + " water / "
+                         + (soundMode == SoundMode::superCollider
+                                ? (scEngine.isReady() ? "SC" : "SC missing")
+                                : "JUCE");
         g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
         g.drawFittedText (stats, layout.footer.reduced (14, 0), juce::Justification::centredRight, 1);
     }
@@ -2834,6 +2998,7 @@ private:
         else if (button == &stopButton)  setPlaying (false);
         else if (button == &noteDownButton) adjustSelectedValveNote (-1);
         else if (button == &noteUpButton)   adjustSelectedValveNote (1);
+        else if (button == &compileScButton) compileScProgram();
         else if (button == &demoButton)
         {
             setPlaying (false);
@@ -2909,6 +3074,24 @@ private:
             updateInspectorControls();
             setStatus ("Scale " + scaleNameForIndex (scaleIndex));
             repaint();
+        }
+        else if (comboBoxThatHasChanged == &soundModeBox)
+        {
+            soundMode = soundModeBox.getSelectedItemIndex() == 1 ? SoundMode::superCollider
+                                                                 : SoundMode::internal;
+            if (soundMode == SoundMode::superCollider)
+            {
+                if (scEngine.isReady())
+                    compileScProgram();
+                else
+                    setStatus ("SC unavailable");
+            }
+            else
+            {
+                setStatus ("JUCE sound mode");
+            }
+
+            updateSoundModeControls();
         }
     }
 };

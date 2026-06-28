@@ -25,6 +25,9 @@ juce_add_gui_app(pipe
 
 target_sources(pipe
     PRIVATE
+        Source/EmbeddedScAudioEngine.cpp
+        Source/EmbeddedScAudioEngine.h
+        Source/InternalEvent.h
         Source/Main.cpp
 )
 
@@ -34,7 +37,17 @@ target_compile_definitions(pipe
         JUCE_USE_CURL=0
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:pipe,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:pipe,JUCE_VERSION>"
+        GRIDCOLLIDER_ALCHEMY_SC_ROOT="/Users/user/Documents/weld2/ChucK_weld_engine"
 )
+
+if (EXISTS "/Users/user/Documents/weld2/ChucK_weld_engine/third_party/supercollider/include/server/SC_WorldOptions.h")
+    target_include_directories(pipe SYSTEM
+        PRIVATE
+            "/Users/user/Documents/weld2/ChucK_weld_engine/third_party/supercollider/include/common"
+            "/Users/user/Documents/weld2/ChucK_weld_engine/third_party/supercollider/include/plugin_interface"
+            "/Users/user/Documents/weld2/ChucK_weld_engine/third_party/supercollider/include/server")
+    target_compile_definitions(pipe PRIVATE GRIDCOLLIDER_HAS_SC_HEADERS=1)
+endif()
 
 target_link_libraries(pipe
     PRIVATE
