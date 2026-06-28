@@ -77,6 +77,7 @@ constexpr std::array<FaceDef, 6> faces {{
 
 enum class Tool
 {
+    select,
     pipe,
     tap,
     valve,
@@ -690,6 +691,7 @@ public:
 
     static juce::Colour colourForButton (const juce::String& text)
     {
+        if (text == "SELECT") return mint;
         if (text == "PIPE")  return lemon;
         if (text == "TAP")   return aqua;
         if (text == "VALVE") return pink;
@@ -769,6 +771,7 @@ public:
         setupSlider (layerSlider, 1.0, (double) gridSize, 1.0, 1.0);
         setupSlider (tempoSlider, 40.0, 220.0, 1.0, 120.0);
 
+        setupButton (selectButton, "SELECT", "Inspect cells without changing the pipework");
         setupButton (pipeButton, "PIPE", "Draw connected pipe paths");
         setupButton (tapButton, "TAP", "Add or remove a water source");
         setupButton (valveButton, "VALVE", "Add or remove a sounding point");
@@ -932,6 +935,8 @@ public:
         clearButton.setBounds (top.removeFromLeft (78));
 
         auto tools = layout.tools.reduced (10, 16);
+        selectButton.setBounds (tools.removeFromTop (48));
+        tools.removeFromTop (8);
         pipeButton.setBounds (tools.removeFromTop (48));
         tools.removeFromTop (8);
         tapButton.setBounds (tools.removeFromTop (48));
@@ -1016,6 +1021,13 @@ public:
             }
         }
 
+        if (selectedTool == Tool::select)
+        {
+            setStatus ("Cell selected");
+            repaint();
+            return;
+        }
+
         if (selectedTool == Tool::pipe)
         {
             drawingPipe = true;
@@ -1071,10 +1083,11 @@ public:
     {
         const auto text = key.getTextCharacter();
 
-        if (text == '1' || text == 'p' || text == 'P') { setTool (Tool::pipe); return true; }
-        if (text == '2' || text == 't' || text == 'T') { setTool (Tool::tap); return true; }
-        if (text == '3' || text == 'v' || text == 'V') { setTool (Tool::valve); return true; }
-        if (text == '4' || text == 'd' || text == 'D') { setTool (Tool::drain); return true; }
+        if (text == '1' || text == 's' || text == 'S') { setTool (Tool::select); return true; }
+        if (text == '2' || text == 'p' || text == 'P') { setTool (Tool::pipe); return true; }
+        if (text == '3' || text == 't' || text == 'T') { setTool (Tool::tap); return true; }
+        if (text == '4' || text == 'v' || text == 'V') { setTool (Tool::valve); return true; }
+        if (text == '5' || text == 'd' || text == 'D') { setTool (Tool::drain); return true; }
         if (text == 'e' || text == 'E') { setTool (Tool::erase); return true; }
 
         if (key == juce::KeyPress::spaceKey)
@@ -1123,6 +1136,7 @@ private:
     std::array<juce::TextButton, 6> faceButtons;
     juce::Slider layerSlider;
     juce::Slider tempoSlider;
+    juce::TextButton selectButton;
     juce::TextButton pipeButton;
     juce::TextButton tapButton;
     juce::TextButton valveButton;
@@ -1135,7 +1149,7 @@ private:
     juce::TextButton noteDownButton;
     juce::TextButton noteUpButton;
 
-    Tool selectedTool = Tool::pipe;
+    Tool selectedTool = Tool::select;
     int selectedFace = 0;
     int selectedDepth = 0;
     bool drawingPipe = false;
@@ -1376,7 +1390,8 @@ private:
     {
         selectedTool = tool;
         updateButtonStates();
-        setStatus (tool == Tool::pipe ? "Pipe tool" :
+        setStatus (tool == Tool::select ? "Select tool" :
+                   tool == Tool::pipe ? "Pipe tool" :
                    tool == Tool::tap ? "Tap tool" :
                    tool == Tool::valve ? "Valve tool" :
                    tool == Tool::drain ? "Drain tool" : "Erase tool");
@@ -1410,6 +1425,7 @@ private:
 
     void updateButtonStates()
     {
+        selectButton.setToggleState (selectedTool == Tool::select, juce::dontSendNotification);
         pipeButton.setToggleState (selectedTool == Tool::pipe, juce::dontSendNotification);
         tapButton.setToggleState (selectedTool == Tool::tap, juce::dontSendNotification);
         valveButton.setToggleState (selectedTool == Tool::valve, juce::dontSendNotification);
@@ -2509,7 +2525,8 @@ private:
 
     void buttonClicked (juce::Button* button) override
     {
-        if (button == &pipeButton)       setTool (Tool::pipe);
+        if (button == &selectButton)     setTool (Tool::select);
+        else if (button == &pipeButton)  setTool (Tool::pipe);
         else if (button == &tapButton)   setTool (Tool::tap);
         else if (button == &valveButton) setTool (Tool::valve);
         else if (button == &drainButton) setTool (Tool::drain);

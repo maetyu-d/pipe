@@ -19,6 +19,7 @@ build/pipe_artefacts/Debug/pipe.app
 
 ## Play
 
+- Use `SELECT` to inspect cells without changing the pipework.
 - Drag with `PIPE` selected to draw pipe routes on the current 2D layer.
 - Switch faces and layers to build into the 3D volume.
 - Place `TAP` markers as water sources.
@@ -31,4 +32,4 @@ build/pipe_artefacts/Debug/pipe.app
 - Use the File menu to save or load patches as JSON.
 - `DEMO` reloads the starter patch; `CLEAR` empties the grid.
 
-Keyboard shortcuts: `1` pipe, `2` tap, `3` valve, `4` drain, `E` erase, space play/stop, `[` and `]` change layer.
+Keyboard shortcuts: `1` select, `2` pipe, `3` tap, `4` valve, `5` drain, `E` erase, space play/stop, `[` and `]` change layer.
