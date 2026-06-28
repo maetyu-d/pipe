@@ -801,16 +801,19 @@ public:
         scaleBox.addListener (this);
         addAndMakeVisible (scaleBox);
 
-        scProgramEditor.setMultiLine (true);
-        scProgramEditor.setReturnKeyStartsNewLine (true);
-        scProgramEditor.setScrollbarsShown (true);
-        scProgramEditor.setFont (juce::FontOptions (11.0f));
-        scProgramEditor.setColour (juce::TextEditor::backgroundColourId, PipeLookAndFeel::panel2.withAlpha (0.70f));
-        scProgramEditor.setColour (juce::TextEditor::textColourId, PipeLookAndFeel::ink);
-        scProgramEditor.setColour (juce::TextEditor::outlineColourId, PipeLookAndFeel::line.withAlpha (0.55f));
-        scProgramEditor.setText (defaultScProgram(), juce::dontSendNotification);
-        scProgramEditor.setVisible (false);
-        addAndMakeVisible (scProgramEditor);
+        scCodeDocument.replaceAllContent (defaultScProgram());
+        scCodeEditor = std::make_unique<juce::CodeEditorComponent> (scCodeDocument, &scTokeniser);
+        scCodeEditor->setFont (juce::FontOptions (12.0f));
+        scCodeEditor->setTabSize (4, true);
+        scCodeEditor->setLineNumbersShown (true);
+        scCodeEditor->setScrollbarThickness (10);
+        scCodeEditor->setColour (juce::CodeEditorComponent::backgroundColourId, PipeLookAndFeel::panel2.withAlpha (0.78f));
+        scCodeEditor->setColour (juce::CodeEditorComponent::defaultTextColourId, PipeLookAndFeel::ink);
+        scCodeEditor->setColour (juce::CodeEditorComponent::lineNumberTextId, PipeLookAndFeel::muted.withAlpha (0.72f));
+        scCodeEditor->setColour (juce::CodeEditorComponent::lineNumberBackgroundId, PipeLookAndFeel::panel.withAlpha (0.78f));
+        scCodeEditor->setColour (juce::CodeEditorComponent::highlightColourId, PipeLookAndFeel::pink.withAlpha (0.28f));
+        scCodeEditor->setVisible (false);
+        addAndMakeVisible (*scCodeEditor);
 
         for (int i = 0; i < (int) faceButtons.size(); ++i)
             setupButton (faceButtons[(size_t) i], faces[(size_t) i].name, "Show this cube face in the 2D editor");
@@ -832,11 +835,17 @@ public:
         setupButton (noteDownButton, "NOTE -", "Lower the selected valve note");
         setupButton (noteUpButton, "NOTE +", "Raise the selected valve note");
         setupButton (compileScButton, "APPLY SC", "Compile the SuperCollider program for SC mode");
+        setupButton (resetScButton, "RESET", "Reset the SuperCollider program");
+        setupButton (loadScButton, "LOAD", "Load SuperCollider code from a file");
+        setupButton (saveScButton, "SAVE", "Save the SuperCollider code to a file");
         noteSlider.setTooltip ("Tune the selected valve");
         noteDownButton.setVisible (false);
         noteUpButton.setVisible (false);
         noteSlider.setVisible (false);
         compileScButton.setVisible (false);
+        resetScButton.setVisible (false);
+        loadScButton.setVisible (false);
+        saveScButton.setVisible (false);
 
         network.loadDemo();
         updateButtonStates();
@@ -1092,14 +1101,26 @@ public:
             codePane = codePane.withTrimmedBottom (6);
 
             auto codeHeader = codePane.removeFromTop (34);
+            const auto buttonW = 72;
+            saveScButton.setBounds (codeHeader.removeFromRight (buttonW));
+            codeHeader.removeFromRight (6);
+            loadScButton.setBounds (codeHeader.removeFromRight (buttonW));
+            codeHeader.removeFromRight (6);
+            resetScButton.setBounds (codeHeader.removeFromRight (buttonW));
+            codeHeader.removeFromRight (6);
             compileScButton.setBounds (codeHeader.removeFromRight (104));
             codePane.removeFromTop (8);
-            scProgramEditor.setBounds (codePane);
+            if (scCodeEditor != nullptr)
+                scCodeEditor->setBounds (codePane);
         }
         else
         {
             compileScButton.setBounds ({});
-            scProgramEditor.setBounds ({});
+            resetScButton.setBounds ({});
+            loadScButton.setBounds ({});
+            saveScButton.setBounds ({});
+            if (scCodeEditor != nullptr)
+                scCodeEditor->setBounds ({});
         }
     }
 
@@ -1291,7 +1312,12 @@ private:
     juce::TextButton noteDownButton;
     juce::TextButton noteUpButton;
     juce::TextButton compileScButton;
-    juce::TextEditor scProgramEditor;
+    juce::TextButton resetScButton;
+    juce::TextButton loadScButton;
+    juce::TextButton saveScButton;
+    juce::CodeDocument scCodeDocument;
+    juce::CPlusPlusCodeTokeniser scTokeniser;
+    std::unique_ptr<juce::CodeEditorComponent> scCodeEditor;
 
     Tool selectedTool = Tool::select;
     int selectedFace = 0;
@@ -1414,7 +1440,7 @@ private:
         root->setProperty ("rootNote", rootNote);
         root->setProperty ("scale", scaleIndex);
         root->setProperty ("soundMode", soundMode == SoundMode::superCollider ? "sc" : "internal");
-        root->setProperty ("scProgram", scProgramEditor.getText());
+        root->setProperty ("scProgram", getScProgramText());
 
         return root;
     }
@@ -1455,7 +1481,7 @@ private:
         scaleIndex = juce::jlimit (0, 4, (int) patch.getProperty ("scale", scaleIndex));
         soundMode = patch.getProperty ("soundMode", "internal").toString() == "sc" ? SoundMode::superCollider
                                                                                    : SoundMode::internal;
-        scProgramEditor.setText (patch.getProperty ("scProgram", defaultScProgram()).toString(), juce::dontSendNotification);
+        setScProgramText (patch.getProperty ("scProgram", defaultScProgram()).toString());
         tempoSlider.setValue (bpm, juce::dontSendNotification);
         keyBox.setSelectedItemIndex (rootNote, juce::dontSendNotification);
         scaleBox.setSelectedItemIndex (scaleIndex, juce::dontSendNotification);
@@ -1504,6 +1530,61 @@ private:
                                       const auto parsed = juce::JSON::parse (file);
                                       if (! loadPatchFromVar (parsed))
                                           setStatus ("Could not load patch");
+                                  });
+    }
+
+    juce::String getScProgramText() const
+    {
+        return scCodeDocument.getAllContent();
+    }
+
+    void setScProgramText (const juce::String& text)
+    {
+        scCodeDocument.replaceAllContent (text);
+        scProgramLoaded = false;
+    }
+
+    void resetScProgram()
+    {
+        setScProgramText (defaultScProgram());
+        setStatus ("SC code reset");
+        if (soundMode == SoundMode::superCollider)
+            compileScProgram();
+    }
+
+    void saveScProgram()
+    {
+        fileChooser = std::make_unique<juce::FileChooser> ("Save SC code",
+                                                           juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("pipe-sound.scd"),
+                                                           "*.scd;*.sc;*.txt");
+        fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                                  [this] (const juce::FileChooser& chooser)
+                                  {
+                                      const auto file = chooser.getResult();
+                                      if (file == juce::File())
+                                          return;
+
+                                      setStatus (file.replaceWithText (getScProgramText()) ? "SC code saved"
+                                                                                            : "Could not save SC code");
+                                  });
+    }
+
+    void loadScProgram()
+    {
+        fileChooser = std::make_unique<juce::FileChooser> ("Load SC code",
+                                                           juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
+                                                           "*.scd;*.sc;*.txt");
+        fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                  [this] (const juce::FileChooser& chooser)
+                                  {
+                                      const auto file = chooser.getResult();
+                                      if (file == juce::File())
+                                          return;
+
+                                      setScProgramText (file.loadFileAsString());
+                                      setStatus ("SC code loaded");
+                                      if (soundMode == SoundMode::superCollider)
+                                          compileScProgram();
                                   });
     }
 
@@ -1729,7 +1810,7 @@ private:
         }
 
         scSynthName = "pipe_sc_" + juce::String (juce::Time::getMillisecondCounter());
-        const auto source = wrappedScProgram (scSynthName, scProgramEditor.getText());
+        const auto source = wrappedScProgram (scSynthName, getScProgramText());
 
         if (! scEngine.loadSynthDef (scSynthName, source))
         {
@@ -1745,8 +1826,12 @@ private:
     void updateSoundModeControls()
     {
         const auto isSc = soundMode == SoundMode::superCollider;
-        scProgramEditor.setVisible (isSc);
+        if (scCodeEditor != nullptr)
+            scCodeEditor->setVisible (isSc);
         compileScButton.setVisible (isSc);
+        resetScButton.setVisible (isSc);
+        loadScButton.setVisible (isSc);
+        saveScButton.setVisible (isSc);
 
         for (auto& button : faceButtons)
             button.setVisible (! isSc);
@@ -2897,7 +2982,10 @@ private:
 
     void drawScCodePane (juce::Graphics& g) const
     {
-        const auto editorBounds = scProgramEditor.getBounds().toFloat();
+        if (scCodeEditor == nullptr)
+            return;
+
+        const auto editorBounds = scCodeEditor->getBounds().toFloat();
         if (editorBounds.isEmpty())
             return;
 
@@ -2918,7 +3006,7 @@ private:
         g.setFont (juce::FontOptions (9.0f));
         g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
         g.drawFittedText ("SynthDef body or full SynthDef; receives pipe water parameters",
-                          header.withTrimmedLeft (72.0f).withTrimmedRight ((float) compileScButton.getWidth() + 12.0f).toNearestInt(),
+                          header.withTrimmedLeft (72.0f).withTrimmedRight (342.0f).toNearestInt(),
                           juce::Justification::centredLeft,
                           1);
     }
@@ -3077,6 +3165,9 @@ private:
         else if (button == &noteDownButton) adjustSelectedValveNote (-1);
         else if (button == &noteUpButton)   adjustSelectedValveNote (1);
         else if (button == &compileScButton) compileScProgram();
+        else if (button == &resetScButton) resetScProgram();
+        else if (button == &loadScButton) loadScProgram();
+        else if (button == &saveScButton) saveScProgram();
         else if (button == &demoButton)
         {
             setPlaying (false);
